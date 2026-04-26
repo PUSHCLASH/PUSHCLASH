@@ -88,7 +88,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else 1
     return jsonify({'totalBattles': total, 'personalBest': best, 'cityRank': rank})
 
-# ---------- Frontend (with robust AI detection + debug) ----------
+# ---------- Frontend (with strict plank check) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -309,7 +309,7 @@ FRONTEND_HTML = """
   function tapRep(){ if(timeLeft<=0) return; repCount++; document.getElementById('repCounter').textContent=repCount; }
   function spaceHandler(e){ if(e.code==='Space'){ e.preventDefault(); tapRep(); } }
 
-  // ---------- AI Camera (improved + debug) ----------
+  // ---------- AI Camera (with strict plank check) ----------
   async function startAICamera() {
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('poseCanvas');
@@ -329,7 +329,29 @@ FRONTEND_HTML = """
 
     aiRepState = 'up';
     aiLastRepTime = Date.now();
+    window._aiDownStart = null;
     requestAnimationFrame(detectPose);
+  }
+
+  // Check if keypoints indicate a push‑up plank (shoulders and hips roughly horizontal)
+  function isPlankPosition(keypoints) {
+    const leftShoulder = keypoints[5];
+    const rightShoulder = keypoints[6];
+    const leftHip = keypoints[11];
+    const rightHip = keypoints[12];
+
+    // Need at least shoulders and one hip with good confidence
+    if (!leftShoulder || !rightShoulder || (!leftHip && !rightHip)) return false;
+    if (leftShoulder.score < 0.3 || rightShoulder.score < 0.3) return false;
+
+    // Use available hip(s)
+    let hipY = leftHip && leftHip.score > 0.3 ? leftHip.y : (rightHip && rightHip.score > 0.3 ? rightHip.y : null);
+    if (hipY === null) return false;
+
+    const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+    // In a plank, shoulders and hips are at nearly the same vertical position (allow some tolerance)
+    const tolerance = 60; // pixels – depends on camera resolution, but works for typical webcam
+    return Math.abs(shoulderY - hipY) < tolerance;
   }
 
   async function detectPose() {
@@ -351,6 +373,20 @@ FRONTEND_HTML = """
       const keypoints = poses[0].keypoints;
       drawSkeleton(ctx, keypoints);
 
+      // --- Plank check ---
+      const inPlank = isPlankPosition(keypoints);
+      ctx.font = 'bold 22px Poppins';
+      ctx.fillStyle = inPlank ? '#00ff00' : '#ff0000';
+      ctx.fillText(inPlank ? 'PLANK OK' : 'NOT PLANK', 20, 200);
+
+      if (!inPlank) {
+        // Reset any partial down state because we left plank
+        window._aiDownStart = null;
+        aiRepState = 'up';
+        requestAnimationFrame(detectPose);
+        return;
+      }
+
       const leftShoulder = keypoints[5];
       const leftElbow = keypoints[7];
       const leftWrist = keypoints[9];
@@ -362,29 +398,51 @@ FRONTEND_HTML = """
         const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
         const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
         const avgAngle = (leftAngle + rightAngle) / 2;
+        const now = Date.now();
 
         // Debug display
-        ctx.font = 'bold 22px Poppins';
         ctx.fillStyle = '#00ffff';
         ctx.fillText(`Angle: ${Math.round(avgAngle)}°`, 20, 40);
 
-        // Adjusted thresholds (less strict)
-        if (avgAngle < 100 && aiRepState === 'up') {
-          aiRepState = 'down';
-          ctx.fillStyle = '#ff00ff';
-          ctx.fillText('DOWN', 20, 80);
-        } else if (avgAngle > 140 && aiRepState === 'down') {
-          const now = Date.now();
-          if (now - aiLastRepTime > 600) {
-            repCount++;
-            document.getElementById('repCounter').textContent = repCount;
-            aiLastRepTime = now;
-            ctx.fillStyle = '#00ff00';
-            ctx.fillText('REP COUNTED!', 20, 120);
+        // --- Hold‑to‑confirm state machine (only when in plank) ---
+        if (aiRepState === 'up') {
+          if (avgAngle < 95) {
+            if (!window._aiDownStart) {
+              window._aiDownStart = now;
+            }
+            const heldDuration = now - window._aiDownStart;
+            ctx.fillStyle = '#ffaa00';
+            ctx.fillText(`Hold down ${(heldDuration/1000).toFixed(1)}s`, 20, 80);
+
+            if (heldDuration >= 300) {
+              aiRepState = 'down';
+              window._aiDownStart = null;
+              ctx.fillStyle = '#ff00ff';
+              ctx.fillText('DOWN - push up now!', 20, 80);
+            }
+          } else {
+            window._aiDownStart = null;
           }
-          aiRepState = 'up';
+        } else if (aiRepState === 'down') {
+          if (avgAngle > 145) {
+            if (now - aiLastRepTime > 800) {
+              repCount++;
+              document.getElementById('repCounter').textContent = repCount;
+              aiLastRepTime = now;
+              ctx.fillStyle = '#00ff00';
+              ctx.fillText('REP COUNTED!', 20, 120);
+              aiRepState = 'up';
+              window._aiDownStart = null;
+            } else {
+              ctx.fillStyle = '#ffff00';
+              ctx.fillText('Too fast, slow down', 20, 120);
+            }
+          } else {
+            ctx.fillStyle = '#ff00ff';
+            ctx.fillText('DOWN - push up now!', 20, 80);
+          }
         }
-        // Show current state
+
         ctx.fillStyle = '#ffffff';
         ctx.fillText(`State: ${aiRepState}`, 20, 160);
       }
