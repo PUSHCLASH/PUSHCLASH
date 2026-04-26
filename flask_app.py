@@ -337,7 +337,7 @@ FRONTEND_HTML = """
     requestAnimationFrame(detectPose);
   }
 
-  async function detectPose() {
+    async function detectPose() {
     if (timeLeft <= 0 || !aiDetector || !aiStream) return;
 
     const video = document.getElementById('webcam');
@@ -346,6 +346,60 @@ FRONTEND_HTML = """
 
     if (video.readyState < 2) {
       requestAnimationFrame(detectPose);
+      return;
+    }
+
+    const poses = await aiDetector.estimatePoses(video, { flipHorizontal: false });
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (poses.length > 0) {
+      const keypoints = poses[0].keypoints;
+      // Draw skeleton
+      drawSkeleton(ctx, keypoints);
+
+      // Detect push-up
+      const leftShoulder = keypoints[5];
+      const leftElbow = keypoints[7];
+      const leftWrist = keypoints[9];
+      const rightShoulder = keypoints[6];
+      const rightElbow = keypoints[8];
+      const rightWrist = keypoints[10];
+
+      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
+        const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+        const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+        const avgAngle = (leftAngle + rightAngle) / 2;
+
+        // Show angle on canvas for debugging
+        ctx.font = '24px Poppins';
+        ctx.fillStyle = '#00ffff';
+        ctx.fillText(`Angle: ${Math.round(avgAngle)}°`, 20, 40);
+
+        // Adjusted thresholds: easier to count, less strict
+        if (avgAngle < 100 && aiRepState === 'up') {
+          aiRepState = 'down';
+          ctx.fillStyle = '#ff00ff';
+          ctx.fillText('DOWN', 20, 80);
+        } else if (avgAngle > 140 && aiRepState === 'down') {
+          // Completed a rep
+          const now = Date.now();
+          if (now - aiLastRepTime > 600) { // Slightly longer debounce
+            repCount++;
+            document.getElementById('repCounter').textContent = repCount;
+            aiLastRepTime = now;
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText('REP COUNTED!', 20, 120);
+          }
+          aiRepState = 'up';
+        }
+        // Show current state
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`State: ${aiRepState}`, 20, 160);
+      }
+    }
+
+    requestAnimationFrame(detectPose);
+  }
       return;
     }
 
