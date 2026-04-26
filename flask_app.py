@@ -317,4 +317,6 @@ with app.app_context():
     init_db()
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    # Get the port from Render’s environment variable, or use 5000 locally
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
