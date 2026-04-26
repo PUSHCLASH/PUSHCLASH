@@ -88,7 +88,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else 1
     return jsonify({'totalBattles': total, 'personalBest': best, 'cityRank': rank})
 
-# ---------- Frontend (with strict plank check) ----------
+# ---------- Frontend (shoulder‑stability based, no hips) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -309,7 +309,9 @@ FRONTEND_HTML = """
   function tapRep(){ if(timeLeft<=0) return; repCount++; document.getElementById('repCounter').textContent=repCount; }
   function spaceHandler(e){ if(e.code==='Space'){ e.preventDefault(); tapRep(); } }
 
-  // ---------- AI Camera (with strict plank check) ----------
+  // ---------- AI Camera (shoulder stability, no hips) ----------
+  let lastShoulderY = null;   // for stability check
+
   async function startAICamera() {
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('poseCanvas');
@@ -330,28 +332,26 @@ FRONTEND_HTML = """
     aiRepState = 'up';
     aiLastRepTime = Date.now();
     window._aiDownStart = null;
+    lastShoulderY = null;
     requestAnimationFrame(detectPose);
   }
 
-  // Check if keypoints indicate a push‑up plank (shoulders and hips roughly horizontal)
-  function isPlankPosition(keypoints) {
+  function isShoulderStable(keypoints) {
     const leftShoulder = keypoints[5];
     const rightShoulder = keypoints[6];
-    const leftHip = keypoints[11];
-    const rightHip = keypoints[12];
+    if (!leftShoulder || !rightShoulder || leftShoulder.score < 0.3 || rightShoulder.score < 0.3) return false;
 
-    // Need at least shoulders and one hip with good confidence
-    if (!leftShoulder || !rightShoulder || (!leftHip && !rightHip)) return false;
-    if (leftShoulder.score < 0.3 || rightShoulder.score < 0.3) return false;
+    const currentY = (leftShoulder.y + rightShoulder.y) / 2;
+    if (lastShoulderY === null) {
+      lastShoulderY = currentY;
+      return true; // first frame, assume stable
+    }
 
-    // Use available hip(s)
-    let hipY = leftHip && leftHip.score > 0.3 ? leftHip.y : (rightHip && rightHip.score > 0.3 ? rightHip.y : null);
-    if (hipY === null) return false;
+    const movement = Math.abs(currentY - lastShoulderY);
+    lastShoulderY = currentY;
 
-    const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-    // In a plank, shoulders and hips are at nearly the same vertical position (allow some tolerance)
-    const tolerance = 60; // pixels – depends on camera resolution, but works for typical webcam
-    return Math.abs(shoulderY - hipY) < tolerance;
+    // If shoulders moved more than 40 pixels, it's not a stable push-up position
+    return movement <= 40;
   }
 
   async function detectPose() {
@@ -373,14 +373,13 @@ FRONTEND_HTML = """
       const keypoints = poses[0].keypoints;
       drawSkeleton(ctx, keypoints);
 
-      // --- Plank check ---
-      const inPlank = isPlankPosition(keypoints);
+      const stable = isShoulderStable(keypoints);
       ctx.font = 'bold 22px Poppins';
-      ctx.fillStyle = inPlank ? '#00ff00' : '#ff0000';
-      ctx.fillText(inPlank ? 'PLANK OK' : 'NOT PLANK', 20, 200);
+      ctx.fillStyle = stable ? '#00ff00' : '#ff0000';
+      ctx.fillText(stable ? 'Shoulder stable: YES' : 'Shoulder stable: NO', 20, 200);
 
-      if (!inPlank) {
-        // Reset any partial down state because we left plank
+      // If shoulders are not stable, reset any partial down state
+      if (!stable) {
         window._aiDownStart = null;
         aiRepState = 'up';
         requestAnimationFrame(detectPose);
@@ -400,11 +399,10 @@ FRONTEND_HTML = """
         const avgAngle = (leftAngle + rightAngle) / 2;
         const now = Date.now();
 
-        // Debug display
         ctx.fillStyle = '#00ffff';
         ctx.fillText(`Angle: ${Math.round(avgAngle)}°`, 20, 40);
 
-        // --- Hold‑to‑confirm state machine (only when in plank) ---
+        // --- Hold‑to‑confirm state machine (only if shoulders stable) ---
         if (aiRepState === 'up') {
           if (avgAngle < 95) {
             if (!window._aiDownStart) {
