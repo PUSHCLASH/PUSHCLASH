@@ -88,7 +88,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else 1
     return jsonify({'totalBattles': total, 'personalBest': best, 'cityRank': rank})
 
-# ---------- Frontend (with AI camera observer) ----------
+# ---------- Frontend (with robust AI detection + debug) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -124,8 +124,8 @@ FRONTEND_HTML = """
     nav { display:flex; gap:10px; margin:16px 0; }
     nav button { flex:1; font-size:0.8rem; padding:10px; }
     video, canvas { width:100%; border-radius:14px; display:none; }
-    #aiCameraUI video, #aiCameraUI canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
     #aiCameraUI { position:relative; width:100%; height:250px; margin:10px 0; border-radius:14px; overflow:hidden; }
+    #aiCameraUI video, #aiCameraUI canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
     .mode-choice { display:flex; gap:10px; margin:20px 0; }
     .mode-choice button { flex:1; }
   </style>
@@ -199,7 +199,6 @@ FRONTEND_HTML = """
   </div>
 </div>
 
-<!-- TensorFlow.js + MoveNet -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
 
@@ -208,15 +207,15 @@ FRONTEND_HTML = """
   let repCount = 0;
   let timeLeft = 60;
   let challengeInterval, countdownInterval;
-  let challengeMode = 'manual'; // 'manual' or 'ai'
+  let challengeMode = 'manual';
   let aiDetector = null;
   let aiStream = null;
-  let aiRepState = 'up'; // 'up' or 'down'
+  let aiRepState = 'up';
   let aiLastRepTime = 0;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
-  // ---------- Profile & Navigation (same as before) ----------
+  // ---------- Profile & Navigation ----------
   function saveProfile(){
     const n=document.getElementById('nicknameInput').value.trim();
     const c=document.getElementById('cityInput').value.trim();
@@ -310,34 +309,30 @@ FRONTEND_HTML = """
   function tapRep(){ if(timeLeft<=0) return; repCount++; document.getElementById('repCounter').textContent=repCount; }
   function spaceHandler(e){ if(e.code==='Space'){ e.preventDefault(); tapRep(); } }
 
-  // ---------- AI Camera ----------
+  // ---------- AI Camera (improved + debug) ----------
   async function startAICamera() {
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('poseCanvas');
     const ctx = canvas.getContext('2d');
 
-    // Ask for camera
     aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
     video.srcObject = aiStream;
     await video.play();
 
-    // Setup canvas size
     video.addEventListener('loadedmetadata', () => {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
     });
 
-    // Load MoveNet
     const detectorConfig = { modelType: 'SinglePose.Lightning' };
     aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
 
-    // Start AI loop
     aiRepState = 'up';
     aiLastRepTime = Date.now();
     requestAnimationFrame(detectPose);
   }
 
-    async function detectPose() {
+  async function detectPose() {
     if (timeLeft <= 0 || !aiDetector || !aiStream) return;
 
     const video = document.getElementById('webcam');
@@ -354,10 +349,8 @@ FRONTEND_HTML = """
 
     if (poses.length > 0) {
       const keypoints = poses[0].keypoints;
-      // Draw skeleton
       drawSkeleton(ctx, keypoints);
 
-      // Detect push-up
       const leftShoulder = keypoints[5];
       const leftElbow = keypoints[7];
       const leftWrist = keypoints[9];
@@ -370,20 +363,19 @@ FRONTEND_HTML = """
         const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
         const avgAngle = (leftAngle + rightAngle) / 2;
 
-        // Show angle on canvas for debugging
-        ctx.font = '24px Poppins';
+        // Debug display
+        ctx.font = 'bold 22px Poppins';
         ctx.fillStyle = '#00ffff';
         ctx.fillText(`Angle: ${Math.round(avgAngle)}°`, 20, 40);
 
-        // Adjusted thresholds: easier to count, less strict
+        // Adjusted thresholds (less strict)
         if (avgAngle < 100 && aiRepState === 'up') {
           aiRepState = 'down';
           ctx.fillStyle = '#ff00ff';
           ctx.fillText('DOWN', 20, 80);
         } else if (avgAngle > 140 && aiRepState === 'down') {
-          // Completed a rep
           const now = Date.now();
-          if (now - aiLastRepTime > 600) { // Slightly longer debounce
+          if (now - aiLastRepTime > 600) {
             repCount++;
             document.getElementById('repCounter').textContent = repCount;
             aiLastRepTime = now;
@@ -400,51 +392,8 @@ FRONTEND_HTML = """
 
     requestAnimationFrame(detectPose);
   }
-      return;
-    }
-
-    const poses = await aiDetector.estimatePoses(video, { flipHorizontal: false });
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (poses.length > 0) {
-      const keypoints = poses[0].keypoints;
-      // Draw skeleton
-      drawSkeleton(ctx, keypoints);
-
-      // Detect push-up
-      const leftShoulder = keypoints[5];
-      const leftElbow = keypoints[7];
-      const leftWrist = keypoints[9];
-      const rightShoulder = keypoints[6];
-      const rightElbow = keypoints[8];
-      const rightWrist = keypoints[10];
-
-      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
-        const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-        const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-        const avgAngle = (leftAngle + rightAngle) / 2;
-
-        // Push-up phase detection
-        if (avgAngle < 90 && aiRepState === 'up') {
-          aiRepState = 'down';
-        } else if (avgAngle > 150 && aiRepState === 'down') {
-          // Completed a rep
-          const now = Date.now();
-          if (now - aiLastRepTime > 500) { // Prevent double-count
-            repCount++;
-            document.getElementById('repCounter').textContent = repCount;
-            aiLastRepTime = now;
-          }
-          aiRepState = 'up';
-        }
-      }
-    }
-
-    requestAnimationFrame(detectPose);
-  }
 
   function calculateAngle(a, b, c) {
-    // Angle at b (elbow)
     const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
     let angle = Math.abs(radians * 180.0 / Math.PI);
     if (angle > 180.0) angle = 360 - angle;
@@ -465,7 +414,6 @@ FRONTEND_HTML = """
         ctx.stroke();
       }
     }
-    // Draw keypoints
     for (const kp of keypoints) {
       if (kp.score > 0.3) {
         ctx.fillStyle = '#ff00ff';
@@ -537,5 +485,3 @@ with app.app_context():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
- 
