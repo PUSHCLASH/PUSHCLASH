@@ -5,9 +5,8 @@ from flask import Flask, request, jsonify, g
 # ---------- App definition ----------
 app = Flask(__name__)
 
-# ---------- Database setup ----------
-DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pushclash.db')
-
+import os
+DATABASE = '/tmp/pushclash.db'
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
