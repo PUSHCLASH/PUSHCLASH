@@ -5,8 +5,9 @@ from flask import Flask, request, jsonify, g
 # ---------- App definition ----------
 app = Flask(__name__)
 
-import os
-DATABASE = '/tmp/pushclash.db'
+# ---------- Database setup ----------
+DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pushclash.db')
+
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
@@ -87,7 +88,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else 1
     return jsonify({'totalBattles': total, 'personalBest': best, 'cityRank': rank})
 
-# ---------- Frontend (fully embedded) ----------
+# ---------- Frontend (with AI camera observer) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -122,6 +123,11 @@ FRONTEND_HTML = """
     .small { font-size:0.85rem; color:#aaa; }
     nav { display:flex; gap:10px; margin:16px 0; }
     nav button { flex:1; font-size:0.8rem; padding:10px; }
+    video, canvas { width:100%; border-radius:14px; display:none; }
+    #aiCameraUI video, #aiCameraUI canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
+    #aiCameraUI { position:relative; width:100%; height:250px; margin:10px 0; border-radius:14px; overflow:hidden; }
+    .mode-choice { display:flex; gap:10px; margin:20px 0; }
+    .mode-choice button { flex:1; }
   </style>
 </head>
 <body>
@@ -149,7 +155,10 @@ FRONTEND_HTML = """
         <div class="small">Total Battles</div>
       </div>
     </div>
-    <button onclick="startChallenge()">💥 Start 60-Second Battle</button>
+    <div class="mode-choice">
+      <button onclick="startChallenge('manual')">👆 Manual Tap</button>
+      <button onclick="startChallenge('ai')">🤖 AI Camera</button>
+    </div>
     <button class="secondary" onclick="showLeaderboard('local')">🏆 Leaderboard</button>
     <button class="secondary" onclick="resetProfile()">🔄 Reset Identity</button>
   </div>
@@ -159,8 +168,16 @@ FRONTEND_HTML = """
     <div id="challengeActiveUI" style="display:none;">
       <div class="timer-big" id="timerDisplay">60</div>
       <div class="counter-big" id="repCounter">0</div>
-      <div class="tap-btn" id="tapButton">REP</div>
-      <p style="text-align:center; color:#aaa;">Tap or press spacebar</p>
+      <!-- Manual UI -->
+      <div id="manualUI" style="display:none;">
+        <div class="tap-btn" id="tapButton">REP</div>
+        <p style="text-align:center; color:#aaa;">Tap or press spacebar</p>
+      </div>
+      <!-- AI UI -->
+      <div id="aiCameraUI" style="display:none;">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="poseCanvas"></canvas>
+      </div>
     </div>
     <div id="battleResultUI" style="display:none; text-align:center;">
       <h2>⚔️ Battle Over!</h2>
@@ -181,14 +198,25 @@ FRONTEND_HTML = """
     <button class="secondary" onclick="goToDashboard()" style="margin-top:16px;">← Back</button>
   </div>
 </div>
+
+<!-- TensorFlow.js + MoveNet -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
+
 <script>
   let currentUser = null;
   let repCount = 0;
   let timeLeft = 60;
   let challengeInterval, countdownInterval;
+  let challengeMode = 'manual'; // 'manual' or 'ai'
+  let aiDetector = null;
+  let aiStream = null;
+  let aiRepState = 'up'; // 'up' or 'down'
+  let aiLastRepTime = 0;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
+  // ---------- Profile & Navigation (same as before) ----------
   function saveProfile(){
     const n=document.getElementById('nicknameInput').value.trim();
     const c=document.getElementById('cityInput').value.trim();
@@ -208,8 +236,14 @@ FRONTEND_HTML = """
     document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
     document.getElementById(id).classList.add('active');
   }
-  function goToDashboard(){ loadStats(); showScreen('dashboardScreen'); }
-
+  function goToDashboard(){
+    if (aiStream) {
+      aiStream.getTracks().forEach(track => track.stop());
+      aiStream = null;
+    }
+    loadStats();
+    showScreen('dashboardScreen');
+  }
   async function loadStats(){
     if(!currentUser) return;
     document.getElementById('dashNickname').textContent=currentUser.nickname;
@@ -220,11 +254,14 @@ FRONTEND_HTML = """
     document.getElementById('totalBattles').textContent = data.totalBattles;
   }
 
-  function startChallenge(){
+  // ---------- Challenge Start ----------
+  async function startChallenge(mode) {
+    challengeMode = mode;
     showScreen('challengeScreen');
     document.getElementById('countdownDisplay').style.display='block';
     document.getElementById('challengeActiveUI').style.display='none';
     document.getElementById('battleResultUI').style.display='none';
+    repCount = 0;
     let count=3;
     document.getElementById('countdownDisplay').textContent=count;
     countdownInterval = setInterval(()=>{
@@ -242,14 +279,24 @@ FRONTEND_HTML = """
     },800);
   }
 
-  function startActiveChallenge(){
-    repCount=0; timeLeft=60;
+  async function startActiveChallenge(){
+    timeLeft=60;
     document.getElementById('challengeActiveUI').style.display='block';
     document.getElementById('timerDisplay').textContent=timeLeft;
-    document.getElementById('repCounter').textContent=repCount;
-    document.getElementById('tapButton').onmousedown = function(e){ e.preventDefault(); tapRep(); };
-    document.getElementById('tapButton').ontouchstart = function(e){ e.preventDefault(); tapRep(); };
-    document.addEventListener('keydown', spaceHandler);
+    document.getElementById('repCounter').textContent='0';
+
+    if (challengeMode === 'manual') {
+      document.getElementById('manualUI').style.display='block';
+      document.getElementById('aiCameraUI').style.display='none';
+      document.getElementById('tapButton').onmousedown = function(e){ e.preventDefault(); tapRep(); };
+      document.getElementById('tapButton').ontouchstart = function(e){ e.preventDefault(); tapRep(); };
+      document.addEventListener('keydown', spaceHandler);
+    } else {
+      document.getElementById('manualUI').style.display='none';
+      document.getElementById('aiCameraUI').style.display='block';
+      await startAICamera();
+    }
+
     challengeInterval = setInterval(()=>{
       timeLeft--;
       document.getElementById('timerDisplay').textContent=timeLeft;
@@ -260,12 +307,128 @@ FRONTEND_HTML = """
     },1000);
   }
 
+  function tapRep(){ if(timeLeft<=0) return; repCount++; document.getElementById('repCounter').textContent=repCount; }
   function spaceHandler(e){ if(e.code==='Space'){ e.preventDefault(); tapRep(); } }
 
-  function tapRep(){ if(timeLeft<=0) return; repCount++; document.getElementById('repCounter').textContent=repCount; }
+  // ---------- AI Camera ----------
+  async function startAICamera() {
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('poseCanvas');
+    const ctx = canvas.getContext('2d');
 
+    // Ask for camera
+    aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    video.srcObject = aiStream;
+    await video.play();
+
+    // Setup canvas size
+    video.addEventListener('loadedmetadata', () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    });
+
+    // Load MoveNet
+    const detectorConfig = { modelType: 'SinglePose.Lightning' };
+    aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
+
+    // Start AI loop
+    aiRepState = 'up';
+    aiLastRepTime = Date.now();
+    requestAnimationFrame(detectPose);
+  }
+
+  async function detectPose() {
+    if (timeLeft <= 0 || !aiDetector || !aiStream) return;
+
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('poseCanvas');
+    const ctx = canvas.getContext('2d');
+
+    if (video.readyState < 2) {
+      requestAnimationFrame(detectPose);
+      return;
+    }
+
+    const poses = await aiDetector.estimatePoses(video, { flipHorizontal: false });
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (poses.length > 0) {
+      const keypoints = poses[0].keypoints;
+      // Draw skeleton
+      drawSkeleton(ctx, keypoints);
+
+      // Detect push-up
+      const leftShoulder = keypoints[5];
+      const leftElbow = keypoints[7];
+      const leftWrist = keypoints[9];
+      const rightShoulder = keypoints[6];
+      const rightElbow = keypoints[8];
+      const rightWrist = keypoints[10];
+
+      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
+        const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+        const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+        const avgAngle = (leftAngle + rightAngle) / 2;
+
+        // Push-up phase detection
+        if (avgAngle < 90 && aiRepState === 'up') {
+          aiRepState = 'down';
+        } else if (avgAngle > 150 && aiRepState === 'down') {
+          // Completed a rep
+          const now = Date.now();
+          if (now - aiLastRepTime > 500) { // Prevent double-count
+            repCount++;
+            document.getElementById('repCounter').textContent = repCount;
+            aiLastRepTime = now;
+          }
+          aiRepState = 'up';
+        }
+      }
+    }
+
+    requestAnimationFrame(detectPose);
+  }
+
+  function calculateAngle(a, b, c) {
+    // Angle at b (elbow)
+    const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+    let angle = Math.abs(radians * 180.0 / Math.PI);
+    if (angle > 180.0) angle = 360 - angle;
+    return angle;
+  }
+
+  function drawSkeleton(ctx, keypoints) {
+    const adjacentKeyPoints = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 2;
+    for (const pair of adjacentKeyPoints) {
+      const p1 = keypoints[pair[0]];
+      const p2 = keypoints[pair[1]];
+      if (p1.score > 0.3 && p2.score > 0.3) {
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+    }
+    // Draw keypoints
+    for (const kp of keypoints) {
+      if (kp.score > 0.3) {
+        ctx.fillStyle = '#ff00ff';
+        ctx.beginPath();
+        ctx.arc(kp.x, kp.y, 4, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+  }
+
+  // ---------- End Battle ----------
   async function endBattle(){
     document.removeEventListener('keydown', spaceHandler);
+    if (aiStream) {
+      aiStream.getTracks().forEach(track => track.stop());
+      aiStream = null;
+    }
     document.getElementById('challengeActiveUI').style.display='none';
     document.getElementById('battleResultUI').style.display='block';
     document.getElementById('finalScore').textContent=repCount;
@@ -278,6 +441,7 @@ FRONTEND_HTML = """
     navigator.clipboard.writeText(text).then(()=>alert('Link copied!'));
   }
 
+  // ---------- Leaderboard ----------
   async function showLeaderboard(tab){
     showScreen('leaderboardScreen');
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -317,6 +481,7 @@ with app.app_context():
     init_db()
 
 if __name__ == '__main__':
-    # Get the port from Render’s environment variable, or use 5000 locally
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
+ 
