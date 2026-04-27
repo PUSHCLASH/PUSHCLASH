@@ -88,7 +88,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else 1
     return jsonify({'totalBattles': total, 'personalBest': best, 'cityRank': rank})
 
-# ---------- Frontend (3‑factor AI detection) ----------
+# ---------- Frontend (shoulder stability only, no plank check) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -309,7 +309,7 @@ FRONTEND_HTML = """
   function tapRep(){ if(timeLeft<=0) return; repCount++; document.getElementById('repCounter').textContent=repCount; }
   function spaceHandler(e){ if(e.code==='Space'){ e.preventDefault(); tapRep(); } }
 
-  // ---------- AI Camera (shoulder stability + plank alignment) ----------
+  // ---------- AI Camera (shoulder stability only) ----------
   let lastShoulderY = null;
 
   async function startAICamera() {
@@ -334,21 +334,6 @@ FRONTEND_HTML = """
     window._aiDownStart = null;
     lastShoulderY = null;
     requestAnimationFrame(detectPose);
-  }
-
-  function isPlankPosition(keypoints) {
-    const nose = keypoints[0];
-    const leftShoulder = keypoints[5];
-    const rightShoulder = keypoints[6];
-
-    // Need nose and both shoulders
-    if (!nose || !leftShoulder || !rightShoulder) return false;
-    if (nose.score < 0.3 || leftShoulder.score < 0.3 || rightShoulder.score < 0.3) return false;
-
-    const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-    // In a proper push-up, nose (head) is roughly at the same vertical level as shoulders
-    const tolerance = 120; // pixels
-    return Math.abs(nose.y - shoulderY) < tolerance;
   }
 
   async function detectPose() {
@@ -377,7 +362,7 @@ FRONTEND_HTML = """
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      // 1. Shoulder stability check
+      // ---- Shoulder stability check ----
       const shoulderY = (leftShoulder && rightShoulder ? (leftShoulder.y + rightShoulder.y) / 2 : null);
       if (shoulderY !== null) {
         if (lastShoulderY === null) lastShoulderY = shoulderY;
@@ -386,25 +371,19 @@ FRONTEND_HTML = """
 
         const stable = movement <= 80;
 
-        // 2. Plank alignment check
-        const plank = isPlankPosition(keypoints);
-
-        // Show status on canvas
         ctx.font = 'bold 20px Poppins';
         ctx.fillStyle = stable ? '#00ff00' : '#ff0000';
         ctx.fillText(stable ? 'Stable' : 'Unstable', 20, 200);
-        ctx.fillStyle = plank ? '#00ff00' : '#ff0000';
-        ctx.fillText(plank ? 'Plank OK' : 'Not Plank', 20, 230);
 
-        // If either check fails, reset and skip counting
-        if (!stable || !plank) {
+        // If not stable, reset and skip counting
+        if (!stable) {
           window._aiDownStart = null;
           aiRepState = 'up';
           requestAnimationFrame(detectPose);
           return;
         }
 
-        // 3. Elbow angle processing (only if both checks passed)
+        // ---- Elbow angle counting (only if stable) ----
         if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
           const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
           const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
