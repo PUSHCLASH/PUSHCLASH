@@ -76,7 +76,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (Battle‑themed, no manual, no city/state) ----------
+# ---------- Frontend (Battle‑themed, AI voice welcome) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -176,8 +176,6 @@ FRONTEND_HTML = """
 
     .timer-big { font-size:5rem; text-align:center; font-weight:800; color:#00ffff; text-shadow:0 0 30px cyan; }
     .counter-big { font-size:4rem; text-align:center; font-weight:800; color:#ff00ff; }
-    .tap-btn { width:160px; height:160px; border-radius:50%; font-size:2.2rem; font-weight:bold; margin:20px auto; display:flex; align-items:center; justify-content:center; background:conic-gradient(from 0deg, #00ffff, #ff00ff, #00ffff); color:black; box-shadow:0 0 40px rgba(255,0,255,0.5); cursor:pointer; user-select:none; }
-    .tap-btn:active { transform:scale(0.9); }
     .tabs { display:flex; gap:8px; margin:16px 0; }
     .tab { flex:1; text-align:center; padding:10px; background:#1e1e1e; border-radius:12px; cursor:pointer; font-weight:bold; }
     .tab.active { background:#00ffff; color:black; }
@@ -289,6 +287,21 @@ FRONTEND_HTML = """
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
+  // ---------- AI Voice function ----------
+  function speakWelcome() {
+    const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
+    msg.lang = 'en-US';
+    msg.rate = 0.9;     // slightly slower for warmth
+    msg.pitch = 1.1;    // a little higher for feminine tone
+
+    // Try to select a female voice
+    const voices = speechSynthesis.getVoices();
+    const femaleVoice = voices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha') || v.name.toLowerCase().includes('google uk female') || v.name.toLowerCase().includes('microsoft zira'));
+    if (femaleVoice) msg.voice = femaleVoice;
+
+    speechSynthesis.speak(msg);
+  }
+
   // ---------- Profile & Navigation ----------
   function saveProfile(){
     const name = document.getElementById('nameInput').value.trim();
@@ -309,6 +322,10 @@ FRONTEND_HTML = """
     errorDiv.textContent = '';
     currentUser = {name, nationality, email};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
+
+    // Speak the welcome message
+    speakWelcome();
+
     showScreen('dashboardScreen');
     loadStats();
   }
