@@ -24,7 +24,14 @@ def close_connection(exception):
 def init_db():
     with app.app_context():
         db = get_db()
-        # New schema: name, nationality, email
+        # Check if the table has the old schema (nickname, city, state)
+        cursor = db.execute("PRAGMA table_info(battles)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'nickname' in columns or 'city' in columns or 'state' in columns:
+            # Old schema detected – drop and recreate
+            db.execute('DROP TABLE IF EXISTS battles')
+            db.commit()
+        # Now create the table with the correct columns
         db.execute('''CREATE TABLE IF NOT EXISTS battles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -76,7 +83,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (Battle‑themed, AI voice welcome) ----------
+# ---------- Frontend (Auto‑fix leaderboard + voice) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -193,7 +200,6 @@ FRONTEND_HTML = """
     .mode-choice { display:flex; gap:10px; margin:20px 0; }
     .mode-choice button { flex:1; }
 
-    /* Battle background elements */
     .arena-shield {
       font-size: 3rem;
       text-align: center;
@@ -205,6 +211,12 @@ FRONTEND_HTML = """
       font-size: 0.8rem;
       text-align: center;
       margin: 5px 0;
+    }
+    .success-msg {
+      color: #00ff88;
+      font-size: 0.9rem;
+      text-align: center;
+      margin: 10px 0;
     }
   </style>
 </head>
@@ -241,6 +253,7 @@ FRONTEND_HTML = """
     <button class="btn-primary" onclick="startChallenge('ai')">🤖 START AI BATTLE</button>
     <button class="btn-secondary" onclick="showLeaderboard()">🏆 Global Leaderboard</button>
     <button class="btn-secondary" onclick="resetProfile()">🔄 Leave Arena</button>
+    <div class="success-msg" id="saveConfirmation" style="display:none;">✅ Score saved to global arena!</div>
   </div>
 
   <!-- Challenge Screen -->
@@ -291,14 +304,11 @@ FRONTEND_HTML = """
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
     msg.lang = 'en-US';
-    msg.rate = 0.9;     // slightly slower for warmth
-    msg.pitch = 1.1;    // a little higher for feminine tone
-
-    // Try to select a female voice
+    msg.rate = 0.9;
+    msg.pitch = 1.1;
     const voices = speechSynthesis.getVoices();
     const femaleVoice = voices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha') || v.name.toLowerCase().includes('google uk female') || v.name.toLowerCase().includes('microsoft zira'));
     if (femaleVoice) msg.voice = femaleVoice;
-
     speechSynthesis.speak(msg);
   }
 
@@ -309,12 +319,10 @@ FRONTEND_HTML = """
     const email = document.getElementById('emailInput').value.trim();
     const errorDiv = document.getElementById('setupError');
 
-    // Basic validation
     if(!name || !nationality || !email) {
       errorDiv.textContent = 'All fields are required!';
       return;
     }
-    // Simple email check
     if(!email.includes('@') || !email.includes('.')) {
       errorDiv.textContent = 'Please enter a valid email';
       return;
@@ -339,6 +347,11 @@ FRONTEND_HTML = """
   function showScreen(id){
     document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
     document.getElementById(id).classList.add('active');
+    // Hide save confirmation when leaving dashboard
+    if(id !== 'dashboardScreen') {
+      const conf = document.getElementById('saveConfirmation');
+      if(conf) conf.style.display = 'none';
+    }
   }
 
   function goToDashboard(){
@@ -394,7 +407,6 @@ FRONTEND_HTML = """
     document.getElementById('challengeActiveUI').style.display='block';
     document.getElementById('timerDisplay').textContent=timeLeft;
     document.getElementById('repCounter').textContent='0';
-    // Only AI mode
     document.getElementById('aiCameraUI').style.display='block';
     await startAICamera();
 
@@ -586,6 +598,12 @@ FRONTEND_HTML = """
         score: repCount
       })
     });
+
+    // Show confirmation when user returns to dashboard
+    document.getElementById('saveConfirmation').style.display = 'block';
+    setTimeout(() => {
+      document.getElementById('saveConfirmation').style.display = 'none';
+    }, 4000);
   }
 
   function shareScore(){
