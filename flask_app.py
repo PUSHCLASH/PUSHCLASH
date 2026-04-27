@@ -88,7 +88,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else 1
     return jsonify({'totalBattles': total, 'personalBest': best, 'cityRank': rank})
 
-# ---------- Frontend (simple, reliable AI counting) ----------
+# ---------- Frontend (3‑factor AI detection) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -309,7 +309,9 @@ FRONTEND_HTML = """
   function tapRep(){ if(timeLeft<=0) return; repCount++; document.getElementById('repCounter').textContent=repCount; }
   function spaceHandler(e){ if(e.code==='Space'){ e.preventDefault(); tapRep(); } }
 
-  // ---------- AI Camera (simple, no hips/shoulders) ----------
+  // ---------- AI Camera (shoulder stability + plank alignment) ----------
+  let lastShoulderY = null;
+
   async function startAICamera() {
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('poseCanvas');
@@ -330,7 +332,23 @@ FRONTEND_HTML = """
     aiRepState = 'up';
     aiLastRepTime = Date.now();
     window._aiDownStart = null;
+    lastShoulderY = null;
     requestAnimationFrame(detectPose);
+  }
+
+  function isPlankPosition(keypoints) {
+    const nose = keypoints[0];
+    const leftShoulder = keypoints[5];
+    const rightShoulder = keypoints[6];
+
+    // Need nose and both shoulders
+    if (!nose || !leftShoulder || !rightShoulder) return false;
+    if (nose.score < 0.3 || leftShoulder.score < 0.3 || rightShoulder.score < 0.3) return false;
+
+    const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+    // In a proper push-up, nose (head) is roughly at the same vertical level as shoulders
+    const tolerance = 120; // pixels
+    return Math.abs(nose.y - shoulderY) < tolerance;
   }
 
   async function detectPose() {
@@ -353,74 +371,87 @@ FRONTEND_HTML = """
       drawSkeleton(ctx, keypoints);
 
       const leftShoulder = keypoints[5];
+      const rightShoulder = keypoints[6];
       const leftElbow = keypoints[7];
       const leftWrist = keypoints[9];
-      const rightShoulder = keypoints[6];
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      // Only count if we see all necessary keypoints
-      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
-        const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-        const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-        const avgAngle = (leftAngle + rightAngle) / 2;
-        const now = Date.now();
+      // 1. Shoulder stability check
+      const shoulderY = (leftShoulder && rightShoulder ? (leftShoulder.y + rightShoulder.y) / 2 : null);
+      if (shoulderY !== null) {
+        if (lastShoulderY === null) lastShoulderY = shoulderY;
+        const movement = Math.abs(shoulderY - lastShoulderY);
+        lastShoulderY = shoulderY;
 
-        // Display debug info
-        ctx.font = 'bold 22px Poppins';
-        ctx.fillStyle = '#00ffff';
-        ctx.fillText(`Angle: ${Math.round(avgAngle)}°`, 20, 40);
+        const stable = movement <= 80;
 
-        // Simple state machine with hold
-        if (aiRepState === 'up') {
-          // Going down: angle must be below 95°
-          if (avgAngle < 95) {
-            if (!window._aiDownStart) {
-              window._aiDownStart = now;
-            }
-            const heldDuration = now - window._aiDownStart;
-            ctx.fillStyle = '#ffaa00';
-            ctx.fillText(`Hold down ${(heldDuration/1000).toFixed(1)}s`, 20, 80);
+        // 2. Plank alignment check
+        const plank = isPlankPosition(keypoints);
 
-            // After holding down for 0.3s, we accept it as a real down
-            if (heldDuration >= 300) {
-              aiRepState = 'down';
+        // Show status on canvas
+        ctx.font = 'bold 20px Poppins';
+        ctx.fillStyle = stable ? '#00ff00' : '#ff0000';
+        ctx.fillText(stable ? 'Stable' : 'Unstable', 20, 200);
+        ctx.fillStyle = plank ? '#00ff00' : '#ff0000';
+        ctx.fillText(plank ? 'Plank OK' : 'Not Plank', 20, 230);
+
+        // If either check fails, reset and skip counting
+        if (!stable || !plank) {
+          window._aiDownStart = null;
+          aiRepState = 'up';
+          requestAnimationFrame(detectPose);
+          return;
+        }
+
+        // 3. Elbow angle processing (only if both checks passed)
+        if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
+          const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+          const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+          const avgAngle = (leftAngle + rightAngle) / 2;
+          const now = Date.now();
+
+          ctx.fillStyle = '#00ffff';
+          ctx.fillText(`Angle: ${Math.round(avgAngle)}°`, 20, 40);
+
+          if (aiRepState === 'up') {
+            if (avgAngle < 95) {
+              if (!window._aiDownStart) window._aiDownStart = now;
+              const heldDuration = now - window._aiDownStart;
+              ctx.fillStyle = '#ffaa00';
+              ctx.fillText(`Hold down ${(heldDuration/1000).toFixed(1)}s`, 20, 80);
+              if (heldDuration >= 300) {
+                aiRepState = 'down';
+                window._aiDownStart = null;
+                ctx.fillStyle = '#ff00ff';
+                ctx.fillText('DOWN - push up now!', 20, 80);
+              }
+            } else {
               window._aiDownStart = null;
+            }
+          } else if (aiRepState === 'down') {
+            if (avgAngle > 145) {
+              if (now - aiLastRepTime > 800) {
+                repCount++;
+                document.getElementById('repCounter').textContent = repCount;
+                aiLastRepTime = now;
+                ctx.fillStyle = '#00ff00';
+                ctx.fillText('REP COUNTED!', 20, 120);
+                aiRepState = 'up';
+                window._aiDownStart = null;
+              } else {
+                ctx.fillStyle = '#ffff00';
+                ctx.fillText('Too fast', 20, 120);
+              }
+            } else {
               ctx.fillStyle = '#ff00ff';
               ctx.fillText('DOWN - push up now!', 20, 80);
             }
-          } else {
-            // If angle goes back up before holding, cancel
-            window._aiDownStart = null;
           }
-        } else if (aiRepState === 'down') {
-          // Going up: angle must exceed 145° to count as full extension
-          if (avgAngle > 145) {
-            // Prevent counting if last rep was less than 800ms ago
-            if (now - aiLastRepTime > 800) {
-              repCount++;
-              document.getElementById('repCounter').textContent = repCount;
-              aiLastRepTime = now;
-              ctx.fillStyle = '#00ff00';
-              ctx.fillText('REP COUNTED!', 20, 120);
-              aiRepState = 'up';
-              window._aiDownStart = null;
-            } else {
-              ctx.fillStyle = '#ffff00';
-              ctx.fillText('Too fast, slow down', 20, 120);
-            }
-          } else {
-            // Still in down position
-            ctx.fillStyle = '#ff00ff';
-            ctx.fillText('DOWN - push up now!', 20, 80);
-          }
-        }
 
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(`State: ${aiRepState}`, 20, 160);
-      } else {
-        ctx.fillStyle = '#ff4444';
-        ctx.fillText('Keep full upper body in view', 20, 40);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(`State: ${aiRepState}`, 20, 160);
+        }
       }
     }
 
