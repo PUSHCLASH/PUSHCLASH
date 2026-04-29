@@ -40,7 +40,7 @@ def init_db():
         )''')
         db.commit()
 
-# ---------- API Endpoints ----------
+# ---------- API Endpoints (unchanged) ----------
 @app.route('/api/battle', methods=['POST'])
 def record_battle():
     data = request.get_json()
@@ -109,7 +109,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (simple angle counter + champion voice + weekly leaderboard) ----------
+# ---------- Frontend (hybrid angle + shoulder drop, no up/down display) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -473,10 +473,17 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== SIMPLE, FAST ANGLE COUNTER (the one that works) ==========
+  // ========== HYBRID DETECTOR (angle + auto-calibrated shoulder drop) ==========
   let angleBuffer = [];
   let lastRepTime = 0;
-  let aiState = 'up';
+  let isDown = false;            // true when we are in the bottom position
+  let baselineShoulderY = null;
+  let calibrationFrames = 0;
+  const CALIBRATION_PERIOD = 30; // frames (~1 second at 30fps)
+  const DROP_THRESHOLD_PERCENT = 0.12;  // 12% of frame height
+  const ANGLE_DOWN_THRESHOLD = 105;    // arm angle below this is considered down
+  const ANGLE_UP_THRESHOLD = 150;      // arm angle above this to count as up
+  const MIN_REP_INTERVAL = 400;        // ms between reps
 
   async function startAICamera() {
     const video = document.getElementById('webcam');
@@ -495,9 +502,12 @@ FRONTEND_HTML = """
     const detectorConfig = { modelType: 'SinglePose.Lightning' };
     aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
 
+    // Reset variables
     angleBuffer = [];
     lastRepTime = 0;
-    aiState = 'up';
+    isDown = false;
+    baselineShoulderY = null;
+    calibrationFrames = 0;
     requestAnimationFrame(detectPose);
   }
 
@@ -534,44 +544,81 @@ FRONTEND_HTML = """
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
-        const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-        const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-        const rawAngle = (leftAngle + rightAngle) / 2;
-
-        angleBuffer.push(rawAngle);
-        if (angleBuffer.length > 5) angleBuffer.shift();
-        const smoothedAngle = movingAverage(angleBuffer, 5);
-        if (smoothedAngle === null) {
-          requestAnimationFrame(detectPose);
-          return;
-        }
-
-        overlay.textContent = Math.round(smoothedAngle) + '°';
+      if (!leftShoulder || !rightShoulder || !leftElbow || !leftWrist || !rightElbow || !rightWrist) {
+        overlay.textContent = '?';
         overlay.style.display = 'block';
+        requestAnimationFrame(detectPose);
+        return;
+      }
+
+      // Compute shoulder height (Y increases downward)
+      const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+
+      // Calibration: build baseline shoulder position during first second
+      if (calibrationFrames < CALIBRATION_PERIOD) {
+        if (baselineShoulderY === null) {
+          baselineShoulderY = shoulderY;
+        } else {
+          // Weighted moving average for baseline
+          baselineShoulderY = (baselineShoulderY * calibrationFrames + shoulderY) / (calibrationFrames + 1);
+        }
+        calibrationFrames++;
+      }
+
+      // Compute elbow angle
+      const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+      const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+      const rawAngle = (leftAngle + rightAngle) / 2;
+
+      // Smooth angle
+      angleBuffer.push(rawAngle);
+      if (angleBuffer.length > 3) angleBuffer.shift(); // shorter smoothing for speed
+      const smoothedAngle = movingAverage(angleBuffer, 3);
+      if (smoothedAngle === null) {
+        requestAnimationFrame(detectPose);
+        return;
+      }
+
+      overlay.textContent = Math.round(smoothedAngle) + '°';
+      overlay.style.display = 'block';
+
+      // Only count after calibration is complete
+      if (calibrationFrames >= CALIBRATION_PERIOD && baselineShoulderY !== null) {
+        const frameHeight = canvas.height;
+        const dropAmount = shoulderY - baselineShoulderY; // positive = lower
+        const dropThreshold = frameHeight * DROP_THRESHOLD_PERCENT;
 
         const now = Date.now();
 
-        // Count rep when angle crosses from < 90° (down) to > 160° (up)
-        if (aiState === 'up' && smoothedAngle < 90) {
-          aiState = 'down';
-        } else if (aiState === 'down' && smoothedAngle > 160) {
-          if (now - lastRepTime > 500) {
+        // Down detection: angle below threshold AND shoulders lowered enough
+        if (!isDown && smoothedAngle < ANGLE_DOWN_THRESHOLD && dropAmount > dropThreshold) {
+          isDown = true;
+          // Optionally flash “DOWN” (we won't show state, but could briefly show "DOWN" if desired – we skip)
+        }
+        // Up detection: angle above threshold AND shoulders returned near baseline
+        else if (isDown && smoothedAngle > ANGLE_UP_THRESHOLD && dropAmount < dropThreshold * 0.4) {
+          if (now - lastRepTime > MIN_REP_INTERVAL) {
             repCount++;
             document.getElementById('repCounter').textContent = repCount;
             lastRepTime = now;
+            // Flash “REP COUNTED!” on canvas
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 26px Poppins';
+            ctx.fillText('REP COUNTED!', 20, 100);
           }
-          aiState = 'up';
+          isDown = false;
         }
+      }
 
-        ctx.font = 'bold 18px Poppins';
-        ctx.fillStyle = '#00ffff';
-        ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(`State: ${aiState}`, 20, 70);
-      } else {
-        overlay.textContent = '?';
-        overlay.style.display = 'block';
+      // Show angle (no state text)
+      ctx.font = 'bold 18px Poppins';
+      ctx.fillStyle = '#00ffff';
+      ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
+
+      // If still calibrating, show a small indicator
+      if (calibrationFrames < CALIBRATION_PERIOD) {
+        ctx.fillStyle = '#ffaa00';
+        ctx.fillText('Calibrating...', 20, 70);
       }
     } else {
       overlay.textContent = 'NO POSE';
