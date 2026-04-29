@@ -79,7 +79,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (SIMPLE angle-only counter) ----------
+# ---------- Frontend (Pure elbow‑angle crossing) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -213,7 +213,6 @@ FRONTEND_HTML = """
       text-align: center;
       margin: 10px 0;
     }
-    /* Large angle display */
     .angle-overlay {
       position: absolute;
       top: 50%;
@@ -418,7 +417,7 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== SIMPLE ANGLE-ONLY COUNTER (NO FILTERS) ==========
+  // ========== SIMPLE ELBOW‑ANGLE CROSSING (from your Python script) ==========
   let angleBuffer = [];
   let lastRepTime = 0;
   let aiState = 'up';   // 'up' or 'down'
@@ -479,7 +478,6 @@ FRONTEND_HTML = """
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      // Basic check: do we have all needed points?
       if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
         const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
         const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
@@ -499,11 +497,12 @@ FRONTEND_HTML = """
 
         const now = Date.now();
 
-        // Simple state machine: down if < 90°, up if > 145°
+        // Pure elbow angle state machine (same logic as your Python script)
+        // Down: angle < 90, Up: angle > 160
         if (aiState === 'up' && smoothedAngle < 90) {
           aiState = 'down';
-        } else if (aiState === 'down' && smoothedAngle > 145) {
-          if (now - lastRepTime > 500) {   // min 500ms between reps to avoid double counts
+        } else if (aiState === 'down' && smoothedAngle > 160) {
+          if (now - lastRepTime > 500) {   // minimum 500ms between reps
             repCount++;
             document.getElementById('repCounter').textContent = repCount;
             lastRepTime = now;
