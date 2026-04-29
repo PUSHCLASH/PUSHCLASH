@@ -24,14 +24,12 @@ def close_connection(exception):
 def init_db():
     with app.app_context():
         db = get_db()
-        # Check if the table has the old schema (nickname, city, state)
+        # Drop old schema if needed
         cursor = db.execute("PRAGMA table_info(battles)")
-        columns = [row[1] for row in cursor.fetchall()]
+        columns = [row[1] for row in cursor.fetchall()] if cursor else []
         if 'nickname' in columns or 'city' in columns or 'state' in columns:
-            # Old schema detected – drop and recreate
             db.execute('DROP TABLE IF EXISTS battles')
             db.commit()
-        # Now create the table with the correct columns
         db.execute('''CREATE TABLE IF NOT EXISTS battles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -61,7 +59,6 @@ def record_battle():
 @app.route('/api/leaderboard')
 def leaderboard():
     db = get_db()
-    # Global leaderboard – top 10 by max score per player (using email as unique)
     rows = db.execute(
         'SELECT name, nationality, MAX(score) as max_score FROM battles GROUP BY email ORDER BY max_score DESC LIMIT 10')
     result = [{'name': r['name'], 'nationality': r['nationality'], 'score': r['max_score']} for r in rows]
@@ -83,7 +80,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (Auto‑fix leaderboard + voice) ----------
+# ---------- Frontend (fast AI, no hold) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -133,7 +130,6 @@ FRONTEND_HTML = """
     .screen { display: none; }
     .screen.active { display: block; }
 
-    /* Battle‑theme inputs */
     .battle-input {
       width: 100%;
       padding: 15px 18px;
@@ -222,7 +218,7 @@ FRONTEND_HTML = """
 </head>
 <body>
 <div class="app-container" id="app">
-  <!-- Setup Screen (Battle Arena Entry) -->
+  <!-- Setup Screen -->
   <div id="setupScreen" class="screen active">
     <h1>PUSHCLASH</h1>
     <div class="arena-subtitle">⚔️ ENTER THE ARENA ⚔️</div>
@@ -288,19 +284,16 @@ FRONTEND_HTML = """
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
 
 <script>
-  let currentUser = null;  // {name, nationality, email}
+  let currentUser = null;
   let repCount = 0;
   let timeLeft = 60;
   let challengeInterval, countdownInterval;
   let challengeMode = 'ai';
   let aiDetector = null;
   let aiStream = null;
-  let aiRepState = 'up';
-  let aiLastRepTime = 0;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
-  // ---------- AI Voice function ----------
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
     msg.lang = 'en-US';
@@ -312,13 +305,11 @@ FRONTEND_HTML = """
     speechSynthesis.speak(msg);
   }
 
-  // ---------- Profile & Navigation ----------
   function saveProfile(){
     const name = document.getElementById('nameInput').value.trim();
     const nationality = document.getElementById('nationalityInput').value.trim();
     const email = document.getElementById('emailInput').value.trim();
     const errorDiv = document.getElementById('setupError');
-
     if(!name || !nationality || !email) {
       errorDiv.textContent = 'All fields are required!';
       return;
@@ -330,10 +321,7 @@ FRONTEND_HTML = """
     errorDiv.textContent = '';
     currentUser = {name, nationality, email};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
-
-    // Speak the welcome message
     speakWelcome();
-
     showScreen('dashboardScreen');
     loadStats();
   }
@@ -347,7 +335,6 @@ FRONTEND_HTML = """
   function showScreen(id){
     document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
     document.getElementById(id).classList.add('active');
-    // Hide save confirmation when leaving dashboard
     if(id !== 'dashboardScreen') {
       const conf = document.getElementById('saveConfirmation');
       if(conf) conf.style.display = 'none';
@@ -377,7 +364,6 @@ FRONTEND_HTML = """
     document.getElementById('totalBattles').textContent = data.totalBattles;
   }
 
-  // ---------- Challenge Start (AI only) ----------
   async function startChallenge(mode) {
     challengeMode = mode;
     showScreen('challengeScreen');
@@ -420,9 +406,7 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ---------- AI Camera (shoulder stability only) ----------
-  let lastShoulderY = null;
-
+  // ---------- AI Camera (FAST state machine) ----------
   async function startAICamera() {
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('poseCanvas');
@@ -440,10 +424,9 @@ FRONTEND_HTML = """
     const detectorConfig = { modelType: 'SinglePose.Lightning' };
     aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
 
-    aiRepState = 'up';
-    aiLastRepTime = Date.now();
-    window._aiDownStart = null;
-    lastShoulderY = null;
+    // Reset AI state variables
+    window._aiState = null;
+    window._lastRepTime = 0;
     requestAnimationFrame(detectPose);
   }
 
@@ -473,72 +456,46 @@ FRONTEND_HTML = """
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      const shoulderY = (leftShoulder && rightShoulder ? (leftShoulder.y + rightShoulder.y) / 2 : null);
-      if (shoulderY !== null) {
-        if (lastShoulderY === null) lastShoulderY = shoulderY;
-        const movement = Math.abs(shoulderY - lastShoulderY);
-        lastShoulderY = shoulderY;
+      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
+        const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+        const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+        const avgAngle = (leftAngle + rightAngle) / 2;
+        const now = Date.now();
 
-        const stable = movement <= 80;
+        // Debug display
+        ctx.font = 'bold 22px Poppins';
+        ctx.fillStyle = '#00ffff';
+        ctx.fillText(`Angle: ${Math.round(avgAngle)}°`, 20, 40);
 
-        ctx.font = 'bold 20px Poppins';
-        ctx.fillStyle = stable ? '#00ff00' : '#ff0000';
-        ctx.fillText(stable ? 'Stable' : 'Unstable', 20, 200);
-
-        if (!stable) {
-          window._aiDownStart = null;
-          aiRepState = 'up';
-          requestAnimationFrame(detectPose);
-          return;
+        // Initialize state
+        if (window._aiState === null) {
+          window._aiState = avgAngle < 90 ? 'down' : 'up';
+          window._lastRepTime = 0;
         }
 
-        if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
-          const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-          const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-          const avgAngle = (leftAngle + rightAngle) / 2;
-          const now = Date.now();
-
-          ctx.fillStyle = '#00ffff';
-          ctx.fillText(`Angle: ${Math.round(avgAngle)}°`, 20, 40);
-
-          if (aiRepState === 'up') {
-            if (avgAngle < 95) {
-              if (!window._aiDownStart) window._aiDownStart = now;
-              const heldDuration = now - window._aiDownStart;
-              ctx.fillStyle = '#ffaa00';
-              ctx.fillText(`Hold down ${(heldDuration/1000).toFixed(1)}s`, 20, 80);
-              if (heldDuration >= 300) {
-                aiRepState = 'down';
-                window._aiDownStart = null;
-                ctx.fillStyle = '#ff00ff';
-                ctx.fillText('DOWN - push up now!', 20, 80);
-              }
-            } else {
-              window._aiDownStart = null;
-            }
-          } else if (aiRepState === 'down') {
-            if (avgAngle > 145) {
-              if (now - aiLastRepTime > 800) {
-                repCount++;
-                document.getElementById('repCounter').textContent = repCount;
-                aiLastRepTime = now;
-                ctx.fillStyle = '#00ff00';
-                ctx.fillText('REP COUNTED!', 20, 120);
-                aiRepState = 'up';
-                window._aiDownStart = null;
-              } else {
-                ctx.fillStyle = '#ffff00';
-                ctx.fillText('Too fast', 20, 120);
-              }
-            } else {
-              ctx.fillStyle = '#ff00ff';
-              ctx.fillText('DOWN - push up now!', 20, 80);
-            }
+        if (window._aiState === 'up' && avgAngle < 90) {
+          window._aiState = 'down';
+          ctx.fillStyle = '#ff00ff';
+          ctx.fillText('DOWN', 20, 80);
+        } else if (window._aiState === 'down' && avgAngle > 145) {
+          if (now - window._lastRepTime > 400) {
+            repCount++;
+            document.getElementById('repCounter').textContent = repCount;
+            window._lastRepTime = now;
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText('REP COUNTED!', 20, 120);
+          } else {
+            ctx.fillStyle = '#ffff00';
+            ctx.fillText('Too fast', 20, 120);
           }
-
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(`State: ${aiRepState}`, 20, 160);
+          window._aiState = 'up';
         }
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`State: ${window._aiState}`, 20, 160);
+      } else {
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText('Keep full upper body in view', 20, 40);
       }
     }
 
@@ -587,7 +544,6 @@ FRONTEND_HTML = """
     document.getElementById('finalScore').textContent = repCount;
     document.getElementById('trashTalk').textContent = trashTalks[Math.floor(Math.random()*trashTalks.length)];
 
-    // Save to server
     await fetch('/api/battle', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -599,7 +555,6 @@ FRONTEND_HTML = """
       })
     });
 
-    // Show confirmation when user returns to dashboard
     document.getElementById('saveConfirmation').style.display = 'block';
     setTimeout(() => {
       document.getElementById('saveConfirmation').style.display = 'none';
@@ -611,7 +566,6 @@ FRONTEND_HTML = """
     navigator.clipboard.writeText(text).then(()=>alert('Link copied!'));
   }
 
-  // ---------- Leaderboard (global, no tabs) ----------
   async function showLeaderboard(){
     showScreen('leaderboardScreen');
     const res = await fetch('/api/leaderboard');
@@ -633,7 +587,7 @@ FRONTEND_HTML = """
     }).join('');
   }
 
-  // Init on load
+  // Init
   currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
   if(currentUser){
     showScreen('dashboardScreen');
