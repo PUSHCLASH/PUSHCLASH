@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from datetime import datetime
 from flask import Flask, request, jsonify, g
 
 # ---------- App definition ----------
@@ -58,10 +59,36 @@ def record_battle():
 @app.route('/api/leaderboard')
 def leaderboard():
     db = get_db()
-    rows = db.execute(
-        'SELECT name, nationality, MAX(score) as max_score FROM battles GROUP BY email ORDER BY max_score DESC LIMIT 10')
-    result = [{'name': r['name'], 'nationality': r['nationality'], 'score': r['max_score']} for r in rows]
+    # Weekly leaderboard: battles from the last 7 days
+    rows = db.execute('''
+        SELECT name, nationality, MAX(score) as max_score,
+            (SELECT timestamp FROM battles b2
+             WHERE b2.email = battles.email AND b2.score = MAX(battles.score)
+               AND b2.timestamp >= datetime('now', '-7 days')
+             ORDER BY b2.timestamp DESC LIMIT 1) as best_date
+        FROM battles
+        WHERE timestamp >= datetime('now', '-7 days')
+        GROUP BY email
+        ORDER BY max_score DESC
+        LIMIT 10
+    ''')
+    result = [{
+        'name': r['name'],
+        'nationality': r['nationality'],
+        'score': r['max_score'],
+        'date': format_date(r['best_date'])
+    } for r in rows]
     return jsonify(result)
+
+def format_date(date_str):
+    """Convert SQLite timestamp to a short readable format."""
+    if not date_str:
+        return ''
+    try:
+        dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+        return dt.strftime('%b %d')  # e.g. "Apr 29"
+    except:
+        return ''
 
 @app.route('/api/stats', methods=['POST'])
 def user_stats():
@@ -72,14 +99,17 @@ def user_stats():
     db = get_db()
     total = db.execute('SELECT COUNT(*) as total FROM battles WHERE email=?', (email,)).fetchone()['total']
     best = db.execute('SELECT MAX(score) as best FROM battles WHERE email=?', (email,)).fetchone()['best'] or 0
+    # Weekly rank among all users
     rank_row = db.execute('''
         SELECT COUNT(DISTINCT email) + 1 as rank FROM battles b1
-        WHERE b1.score > (SELECT COALESCE(MAX(score),0) FROM battles b2 WHERE b2.email=?)
+        WHERE b1.timestamp >= datetime('now', '-7 days')
+          AND b1.score > (SELECT COALESCE(MAX(score),0) FROM battles b2
+                          WHERE b2.email=? AND b2.timestamp >= datetime('now', '-7 days'))
     ''', (email,)).fetchone()
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (Pure elbow‑angle crossing) ----------
+# ---------- Frontend (Weekly leaderboard & unchanged AI) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -184,6 +214,7 @@ FRONTEND_HTML = """
     .leaderboard-item { display:flex; align-items:center; gap:12px; padding:10px; background:#1a1a1a; border-radius:12px; margin:6px 0; }
     .rank { font-size:1.5rem; font-weight:bold; width:40px; }
     .score { margin-left:auto; font-weight:bold; color:#00ffff; }
+    .score-date { font-size:0.75rem; color:#888; margin-left:6px; }
     .result-msg { text-align:center; font-size:1.3rem; margin:12px 0; font-style:italic; color:#ff00ff; }
     .share-btn { background:#00ffff; color:black; }
     .small { font-size:0.85rem; color:#aaa; }
@@ -257,7 +288,7 @@ FRONTEND_HTML = """
       </div>
     </div>
     <button class="btn-primary" onclick="startChallenge('ai')">🤖 START AI BATTLE</button>
-    <button class="btn-secondary" onclick="showLeaderboard()">🏆 Global Leaderboard</button>
+    <button class="btn-secondary" onclick="showLeaderboard()">🏆 Weekly Leaderboard</button>
     <button class="btn-secondary" onclick="resetProfile()">🔄 Leave Arena</button>
     <div class="success-msg" id="saveConfirmation" style="display:none;">✅ Score saved to global arena!</div>
   </div>
@@ -285,7 +316,8 @@ FRONTEND_HTML = """
 
   <!-- Leaderboard Screen -->
   <div id="leaderboardScreen" class="screen">
-    <h1>GLOBAL RANKINGS</h1>
+    <h1>WEEKLY RANKINGS</h1>
+    <p class="small" style="text-align:center;">Top 10 of the last 7 days</p>
     <div id="leaderboardList"></div>
     <button class="btn-secondary" onclick="goToDashboard()" style="margin-top:16px;">← Back to Arena</button>
   </div>
@@ -417,7 +449,7 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== SIMPLE ELBOW‑ANGLE CROSSING (from your Python script) ==========
+  // ========== SIMPLE ELBOW‑ANGLE CROSSING (unchanged) ==========
   let angleBuffer = [];
   let lastRepTime = 0;
   let aiState = 'up';   // 'up' or 'down'
@@ -491,18 +523,15 @@ FRONTEND_HTML = """
           return;
         }
 
-        // Show huge angle overlay
         overlay.textContent = Math.round(smoothedAngle) + '°';
         overlay.style.display = 'block';
 
         const now = Date.now();
 
-        // Pure elbow angle state machine (same logic as your Python script)
-        // Down: angle < 90, Up: angle > 160
         if (aiState === 'up' && smoothedAngle < 90) {
           aiState = 'down';
         } else if (aiState === 'down' && smoothedAngle > 160) {
-          if (now - lastRepTime > 500) {   // minimum 500ms between reps
+          if (now - lastRepTime > 500) {
             repCount++;
             document.getElementById('repCounter').textContent = repCount;
             lastRepTime = now;
@@ -510,7 +539,6 @@ FRONTEND_HTML = """
           aiState = 'up';
         }
 
-        // Debug info on canvas
         ctx.font = 'bold 18px Poppins';
         ctx.fillStyle = '#00ffff';
         ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
@@ -592,23 +620,25 @@ FRONTEND_HTML = """
     navigator.clipboard.writeText(text).then(()=>alert('Link copied!'));
   }
 
+  // ---------- Weekly Leaderboard (with date) ----------
   async function showLeaderboard(){
     showScreen('leaderboardScreen');
     const res = await fetch('/api/leaderboard');
     const data = await res.json();
     const container = document.getElementById('leaderboardList');
     if(!data.length){
-      container.innerHTML = '<p style="text-align:center;color:#aaa;">No battles yet. Be the first!</p>';
+      container.innerHTML = '<p style="text-align:center;color:#aaa;">No battles in the last 7 days. Be the first!</p>';
       return;
     }
     container.innerHTML = data.map((b,i)=>{
       const emojis = ['🥇','🥈','🥉'];
       const rankDisp = i<3 ? emojis[i] : `#${i+1}`;
+      const dateStr = b.date ? ` <span class="score-date">${b.date}</span>` : '';
       return `<div class="leaderboard-item">
         <span class="rank">${rankDisp}</span>
         <span>${b.name}</span>
         <span class="small">${b.nationality}</span>
-        <span class="score">${b.score}</span>
+        <span class="score">${b.score}${dateStr}</span>
       </div>`;
     }).join('');
   }
