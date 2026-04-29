@@ -27,9 +27,11 @@ def init_db():
         db = get_db()
         cursor = db.execute("PRAGMA table_info(battles)")
         columns = [row[1] for row in cursor.fetchall()] if cursor else []
+        # Only drop the table if the old schema (nickname/city/state) still exists
         if 'nickname' in columns or 'city' in columns or 'state' in columns:
             db.execute('DROP TABLE IF EXISTS battles')
             db.commit()
+        # Ensure the table exists with the correct columns
         db.execute('''CREATE TABLE IF NOT EXISTS battles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -59,36 +61,39 @@ def record_battle():
 @app.route('/api/leaderboard')
 def leaderboard():
     db = get_db()
-    # Weekly leaderboard: battles from the last 7 days
+    # Weekly leaderboard: only battles from the last 7 days
+    # Get max score per email, then join back to get the date of that score
     rows = db.execute('''
-        SELECT name, nationality, MAX(score) as max_score,
-            (SELECT timestamp FROM battles b2
-             WHERE b2.email = battles.email AND b2.score = MAX(battles.score)
-               AND b2.timestamp >= datetime('now', '-7 days')
-             ORDER BY b2.timestamp DESC LIMIT 1) as best_date
-        FROM battles
-        WHERE timestamp >= datetime('now', '-7 days')
-        GROUP BY email
-        ORDER BY max_score DESC
+        SELECT b.name, b.nationality, t.max_score, b.timestamp as best_date
+        FROM (
+            SELECT email, MAX(score) as max_score
+            FROM battles
+            WHERE timestamp >= datetime('now', '-7 days')
+            GROUP BY email
+        ) t
+        LEFT JOIN battles b ON b.email = t.email
+            AND b.score = t.max_score
+            AND b.timestamp >= datetime('now', '-7 days')
+        GROUP BY t.email
+        ORDER BY t.max_score DESC
         LIMIT 10
-    ''')
-    result = [{
-        'name': r['name'],
-        'nationality': r['nationality'],
-        'score': r['max_score'],
-        'date': format_date(r['best_date'])
-    } for r in rows]
+    ''').fetchall()
+    result = []
+    for r in rows:
+        date_str = ''
+        if r['best_date']:
+            try:
+                dt = datetime.strptime(r['best_date'], '%Y-%m-%d %H:%M:%S')
+                date_str = dt.strftime('%b %d')
+            except:
+                pass
+        result.append({
+            'name': r['name'],
+            'nationality': r['nationality'],
+            'score': r['max_score'],
+            'date': date_str
+        })
     return jsonify(result)
-
-def format_date(date_str):
-    """Convert SQLite timestamp to a short readable format."""
-    if not date_str:
-        return ''
-    try:
-        dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
-        return dt.strftime('%b %d')  # e.g. "Apr 29"
-    except:
-        return ''
 
 @app.route('/api/stats', methods=['POST'])
 def user_stats():
@@ -109,7 +114,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (Weekly leaderboard & unchanged AI) ----------
+# ---------- Frontend (fixed leaderboard + deep voice after battle) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -216,6 +221,18 @@ FRONTEND_HTML = """
     .score { margin-left:auto; font-weight:bold; color:#00ffff; }
     .score-date { font-size:0.75rem; color:#888; margin-left:6px; }
     .result-msg { text-align:center; font-size:1.3rem; margin:12px 0; font-style:italic; color:#ff00ff; }
+    .champion-voice-text {
+      text-align: center;
+      font-size: 1.1rem;
+      color: #ff5500;
+      font-weight: bold;
+      margin: 12px 0;
+      animation: fadeInUp 1s ease;
+    }
+    @keyframes fadeInUp {
+      0% { opacity: 0; transform: translateY(20px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
     .share-btn { background:#00ffff; color:black; }
     .small { font-size:0.85rem; color:#aaa; }
     nav { display:flex; gap:10px; margin:16px 0; }
@@ -309,6 +326,7 @@ FRONTEND_HTML = """
       <h2>⚔️ Battle Over!</h2>
       <div style="font-size:3rem; color:#00ffff;" id="finalScore">0</div>
       <div class="result-msg" id="trashTalk"></div>
+      <div class="champion-voice-text" id="championText" style="display:none;">“Champions are built in losses, my friend. Come back stronger.”</div>
       <button class="btn-primary" onclick="shareScore()">📢 Share My Score</button>
       <button class="btn-secondary" onclick="goToDashboard()">Back to Arena</button>
     </div>
@@ -337,6 +355,7 @@ FRONTEND_HTML = """
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
+  // ---------- Voice assistants ----------
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
     msg.lang = 'en-US';
@@ -348,6 +367,19 @@ FRONTEND_HTML = """
     speechSynthesis.speak(msg);
   }
 
+  function speakChampion() {
+    const msg = new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger.");
+    msg.lang = 'en-US';
+    msg.rate = 0.85;  // slower, deeper
+    msg.pitch = 0.8;   // deep male voice
+    const voices = speechSynthesis.getVoices();
+    // Choose a deep male voice if available
+    const maleVoice = voices.find(v => v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('google uk male') || v.name.toLowerCase().includes('microsoft david') || v.name.toLowerCase().includes('daniel'));
+    if (maleVoice) msg.voice = maleVoice;
+    speechSynthesis.speak(msg);
+  }
+
+  // ---------- Profile & Navigation ----------
   function saveProfile(){
     const name = document.getElementById('nameInput').value.trim();
     const nationality = document.getElementById('nationalityInput').value.trim();
@@ -407,6 +439,7 @@ FRONTEND_HTML = """
     document.getElementById('totalBattles').textContent = data.totalBattles;
   }
 
+  // ---------- Challenge Start ----------
   async function startChallenge(mode) {
     challengeMode = mode;
     showScreen('challengeScreen');
@@ -449,10 +482,10 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== SIMPLE ELBOW‑ANGLE CROSSING (unchanged) ==========
+  // ========== SIMPLE ELBOW‑ANGLE CROSSING ==========
   let angleBuffer = [];
   let lastRepTime = 0;
-  let aiState = 'up';   // 'up' or 'down'
+  let aiState = 'up';
 
   async function startAICamera() {
     const video = document.getElementById('webcam');
@@ -587,7 +620,7 @@ FRONTEND_HTML = """
     }
   }
 
-  // ---------- End Battle ----------
+  // ---------- End Battle with Champion Voice ----------
   async function endBattle(){
     if (aiStream) {
       aiStream.getTracks().forEach(track => track.stop());
@@ -597,6 +630,13 @@ FRONTEND_HTML = """
     document.getElementById('battleResultUI').style.display='block';
     document.getElementById('finalScore').textContent = repCount;
     document.getElementById('trashTalk').textContent = trashTalks[Math.floor(Math.random()*trashTalks.length)];
+
+    // Show champion text with animation
+    const championDiv = document.getElementById('championText');
+    championDiv.style.display = 'block';
+
+    // Speak deep, heroic line
+    speakChampion();
 
     await fetch('/api/battle', {
       method:'POST',
@@ -609,10 +649,10 @@ FRONTEND_HTML = """
       })
     });
 
-    document.getElementById('saveConfirmation').style.display = 'block';
+    // Hide champion text after a few seconds if desired (optional)
     setTimeout(() => {
-      document.getElementById('saveConfirmation').style.display = 'none';
-    }, 4000);
+      championDiv.style.display = 'none';
+    }, 5000);
   }
 
   function shareScore(){
