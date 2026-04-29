@@ -24,7 +24,6 @@ def close_connection(exception):
 def init_db():
     with app.app_context():
         db = get_db()
-        # Clean migration if old schema exists
         cursor = db.execute("PRAGMA table_info(battles)")
         columns = [row[1] for row in cursor.fetchall()] if cursor else []
         if 'nickname' in columns or 'city' in columns or 'state' in columns:
@@ -40,7 +39,7 @@ def init_db():
         )''')
         db.commit()
 
-# ---------- API Endpoints ----------
+# ---------- API Endpoints (unchanged) ----------
 @app.route('/api/battle', methods=['POST'])
 def record_battle():
     data = request.get_json()
@@ -80,7 +79,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (Pro AI detection) ----------
+# ---------- Frontend with FULL DEBUG overlay ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -406,20 +405,19 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== PRO AI DETECTION ==========
-  // Smoothing buffer & stability arrays
-  let angleBuffer = [];              // last 5 angles
-  let shoulderYHistory = [];        // last 10 shoulder Y values
+  // ========== PRO AI DETECTION WITH DETAILED DEBUG ==========
+  let angleBuffer = [];
+  let shoulderYHistory = [];
   let lastRepTime = 0;
-  let currentState = 'up';          // 'up' or 'down'
-  let repValid = false;             // flag used to ensure DOWN->UP transition
+  let currentState = 'up';
+  let repValid = false;
   const MIN_ANGLE_CHANGE = 30;
-  const MIN_REP_INTERVAL = 600;     // ms
+  const MIN_REP_INTERVAL = 600;
   const ANGLE_DOWN_THRESHOLD = 85;
   const ANGLE_UP_THRESHOLD = 165;
   const SHOULDER_STABILITY_WINDOW = 10;
-  const SHOULDER_VARIANCE_THRESHOLD = 15;  // px² (represents shaking)
-  const PLANK_TOLERANCE = 45;       // px – allowed vertical diff between shoulders & hips
+  const SHOULDER_VARIANCE_THRESHOLD = 15;
+  const PLANK_TOLERANCE = 45;
 
   async function startAICamera() {
     const video = document.getElementById('webcam');
@@ -438,7 +436,6 @@ FRONTEND_HTML = """
     const detectorConfig = { modelType: 'SinglePose.Lightning' };
     aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
 
-    // Reset state
     angleBuffer = [];
     shoulderYHistory = [];
     lastRepTime = 0;
@@ -447,25 +444,22 @@ FRONTEND_HTML = """
     requestAnimationFrame(detectPose);
   }
 
-  // Helper to compute moving average of last N values
   function movingAverage(arr, N) {
     const recent = arr.slice(-N);
     if (recent.length === 0) return null;
     return recent.reduce((sum, val) => sum + val, 0) / recent.length;
   }
 
-  // Check form: shoulder-hip alignment (plank check)
   function isGoodForm(keypoints) {
     const leftShoulder = keypoints[5];
     const rightShoulder = keypoints[6];
     const leftHip = keypoints[11];
     const rightHip = keypoints[12];
 
-    if (!leftShoulder || !rightShoulder || (!leftHip && !rightHip)) return false;
-    if (leftShoulder.score < 0.7 || rightShoulder.score < 0.7) return false;
+    if (!leftShoulder || !rightShoulder || (!leftHip && !rightHip)) return {ok: false, detail: 'hip missing'};
+    if (leftShoulder.score < 0.7 || rightShoulder.score < 0.7) return {ok: false, detail: 'shoulder low conf'};
 
     const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-    // use available hip(s) – take mean if both visible
     let hipY = null;
     if (leftHip && leftHip.score > 0.7 && rightHip && rightHip.score > 0.7) {
       hipY = (leftHip.y + rightHip.y) / 2;
@@ -474,21 +468,21 @@ FRONTEND_HTML = """
     } else if (rightHip && rightHip.score > 0.7) {
       hipY = rightHip.y;
     } else {
-      return false;   // no reliable hip data
+      return {ok: false, detail: 'hip low conf'};
     }
 
-    // In a strict push-up plank, shoulder and hip Y should be close
     const diff = Math.abs(shoulderY - hipY);
-    return diff < PLANK_TOLERANCE;
+    const ok = diff < PLANK_TOLERANCE;
+    return {ok, detail: ok ? 'ok' : `plank diff ${Math.round(diff)}`};
   }
 
-  // Check shoulder stability (variance of shoulder Y over last N frames)
   function isStable() {
-    if (shoulderYHistory.length < SHOULDER_STABILITY_WINDOW) return true; // not enough data yet
+    if (shoulderYHistory.length < SHOULDER_STABILITY_WINDOW) return {ok: true, detail: 'warmup'};
     const recent = shoulderYHistory.slice(-SHOULDER_STABILITY_WINDOW);
     const mean = recent.reduce((a,b) => a+b, 0) / recent.length;
     const variance = recent.reduce((sum, val) => sum + (val - mean) ** 2, 0) / recent.length;
-    return variance < SHOULDER_VARIANCE_THRESHOLD;
+    const ok = variance < SHOULDER_VARIANCE_THRESHOLD;
+    return {ok, detail: ok ? 'stable' : `var ${variance.toFixed(1)}`};
   }
 
   async function detectPose() {
@@ -517,33 +511,37 @@ FRONTEND_HTML = """
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      // Require high confidence on crucial keypoints
+      // Check basic keypoints
       if (!leftShoulder || !rightShoulder || !leftElbow || !leftWrist || !rightElbow || !rightWrist) {
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText('Missing keypoints', 20, 200);
         requestAnimationFrame(detectPose);
         return;
       }
+
       const minConf = Math.min(leftShoulder.score, rightShoulder.score, leftElbow.score, rightElbow.score, leftWrist.score, rightWrist.score);
       if (minConf < 0.7) {
         ctx.fillStyle = '#ff4444';
-        ctx.fillText('Low confidence', 20, 200);
+        ctx.fillText(`Low conf: ${minConf.toFixed(2)}`, 20, 200);
         requestAnimationFrame(detectPose);
         return;
       }
 
-      // Form check
-      const goodForm = isGoodForm(keypoints);
+      // Form
+      const formResult = isGoodForm(keypoints);
+      const goodForm = formResult.ok;
 
-      // Shoulder stability
+      // Stability
       const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
       shoulderYHistory.push(shoulderY);
-      if (shoulderYHistory.length > 30) shoulderYHistory.shift(); // keep last 30
-      const stable = isStable();
+      if (shoulderYHistory.length > 30) shoulderYHistory.shift();
+      const stabilityResult = isStable();
+      const stable = stabilityResult.ok;
 
-      // Compute raw angle and smooth it
+      // Angle
       const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
       const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
       const rawAngle = (leftAngle + rightAngle) / 2;
-
       angleBuffer.push(rawAngle);
       if (angleBuffer.length > 5) angleBuffer.shift();
       const smoothedAngle = movingAverage(angleBuffer, 5);
@@ -552,60 +550,86 @@ FRONTEND_HTML = """
         return;
       }
 
-      // Display info
-      ctx.font = 'bold 20px Poppins';
-      ctx.fillStyle = '#00ffff';
-      ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
-
-      // State machine with form & stability checks
       const now = Date.now();
 
-      // If form is bad or unstable, reset any partial rep and show warning
-      if (!goodForm || !stable) {
-        if (!goodForm) {
-          ctx.fillStyle = '#ff4444';
-          ctx.fillText('BAD FORM', 20, 80);
-        } else {
-          ctx.fillStyle = '#ff8800';
-          ctx.fillText('UNSTABLE', 20, 80);
-        }
-        // Reset state
-        currentState = 'up';
-        repValid = false;
-        requestAnimationFrame(detectPose);
-        return;
-      }
+      // ---- HUGE DEBUG OVERLAY ----
+      const xLeft = 20;
+      let y = 40;
 
-      // Core rep logic
-      if (currentState === 'up' && smoothedAngle < ANGLE_DOWN_THRESHOLD) {
-        // Going down
-        // Check that the angle change from last up was significant (avoid tiny movements)
+      // Angle
+      ctx.font = 'bold 22px Poppins';
+      ctx.fillStyle = '#00ffff';
+      ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, xLeft, y); y += 30;
+
+      // State
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(`State: ${currentState}`, xLeft, y); y += 30;
+
+      // Form
+      ctx.fillStyle = goodForm ? '#00ff00' : '#ff4444';
+      ctx.fillText(`Form: ${goodForm ? 'GOOD' : 'BAD'} (${formResult.detail})`, xLeft, y); y += 30;
+
+      // Stability
+      ctx.fillStyle = stable ? '#00ff00' : '#ff8800';
+      ctx.fillText(`Stable: ${stable ? 'YES' : 'NO'} (${stabilityResult.detail})`, xLeft, y); y += 30;
+
+      // Confidence
+      ctx.fillStyle = '#aaaaaa';
+      ctx.fillText(`Conf: ${minConf.toFixed(2)}`, xLeft, y); y += 30;
+
+      // Rejection reason placeholder
+      let rejectReason = '';
+
+      if (!goodForm) {
+        rejectReason = `BAD FORM (${formResult.detail})`;
+      } else if (!stable) {
+        rejectReason = `UNSTABLE (${stabilityResult.detail})`;
+      } else if (currentState === 'up' && smoothedAngle < ANGLE_DOWN_THRESHOLD) {
         const lastUpAngle = angleBuffer.length >= 2 ? angleBuffer[angleBuffer.length-2] : 180;
-        if (Math.abs(lastUpAngle - smoothedAngle) > MIN_ANGLE_CHANGE) {
-          currentState = 'down';
-          repValid = true;   // down phase started
-          ctx.fillStyle = '#ff00ff';
-          ctx.fillText('DOWN', 20, 80);
+        if (Math.abs(lastUpAngle - smoothedAngle) <= MIN_ANGLE_CHANGE) {
+          rejectReason = 'Angle change too small';
         }
       } else if (currentState === 'down' && smoothedAngle > ANGLE_UP_THRESHOLD) {
-        // Going up – count if the rep was valid and enough time passed
-        if (repValid && (now - lastRepTime) > MIN_REP_INTERVAL) {
-          // Also ensure the angle rose enough from down
+        if ((now - lastRepTime) <= MIN_REP_INTERVAL) {
+          rejectReason = 'Too fast (interval)';
+        } else {
           const lastDownAngle = angleBuffer.length >= 2 ? angleBuffer[angleBuffer.length-2] : 0;
-          if (Math.abs(smoothedAngle - lastDownAngle) > MIN_ANGLE_CHANGE) {
-            repCount++;
-            document.getElementById('repCounter').textContent = repCount;
-            lastRepTime = now;
-            ctx.fillStyle = '#00ff00';
-            ctx.fillText('GOOD REP!', 20, 120);
+          if (Math.abs(smoothedAngle - lastDownAngle) <= MIN_ANGLE_CHANGE) {
+            rejectReason = 'Angle change too small';
           }
         }
+      }
+
+      if (rejectReason) {
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText(`Blocked: ${rejectReason}`, xLeft, y); y += 30;
+      }
+
+      // Rep counting logic (unchanged)
+      if (goodForm && stable) {
+        if (currentState === 'up' && smoothedAngle < ANGLE_DOWN_THRESHOLD) {
+          const lastUpAngle = angleBuffer.length >= 2 ? angleBuffer[angleBuffer.length-2] : 180;
+          if (Math.abs(lastUpAngle - smoothedAngle) > MIN_ANGLE_CHANGE) {
+            currentState = 'down';
+            repValid = true;
+          }
+        } else if (currentState === 'down' && smoothedAngle > ANGLE_UP_THRESHOLD) {
+          if (repValid && (now - lastRepTime) > MIN_REP_INTERVAL) {
+            const lastDownAngle = angleBuffer.length >= 2 ? angleBuffer[angleBuffer.length-2] : 0;
+            if (Math.abs(smoothedAngle - lastDownAngle) > MIN_ANGLE_CHANGE) {
+              repCount++;
+              document.getElementById('repCounter').textContent = repCount;
+              lastRepTime = now;
+            }
+          }
+          currentState = 'up';
+          repValid = false;
+        }
+      } else {
+        // Reset partial rep if form or stability lost
         currentState = 'up';
         repValid = false;
       }
-
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(`State: ${currentState}`, 20, 160);
     }
 
     requestAnimationFrame(detectPose);
