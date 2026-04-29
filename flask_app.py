@@ -109,7 +109,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (Advanced, calibration‑based counter) ----------
+# ---------- Frontend (simple angle counter + champion voice + weekly leaderboard) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -267,13 +267,6 @@ FRONTEND_HTML = """
       text-shadow: 0 0 30px cyan;
       pointer-events: none;
     }
-    .calibration-text {
-      text-align: center;
-      font-size: 1.4rem;
-      color: #ffaa00;
-      font-weight: bold;
-      margin: 10px 0;
-    }
   </style>
 </head>
 <body>
@@ -318,7 +311,6 @@ FRONTEND_HTML = """
     <div id="challengeActiveUI" style="display:none;">
       <div class="timer-big" id="timerDisplay">60</div>
       <div class="counter-big" id="repCounter">0</div>
-      <div class="calibration-text" id="calibrationMessage" style="display:none;">CALIBRATING… Hold plank!</div>
       <div id="aiCameraUI">
         <video id="webcam" autoplay playsinline></video>
         <canvas id="poseCanvas"></canvas>
@@ -469,16 +461,7 @@ FRONTEND_HTML = """
     document.getElementById('timerDisplay').textContent=timeLeft;
     document.getElementById('repCounter').textContent='0';
     document.getElementById('aiCameraUI').style.display='block';
-    // Show calibration message
-    const calibMsg = document.getElementById('calibrationMessage');
-    calibMsg.style.display = 'block';
-    calibMsg.textContent = 'CALIBRATING… Hold the plank position';
     await startAICamera();
-
-    // After a short calibration period, remove the message
-    setTimeout(() => {
-      calibMsg.style.display = 'none';
-    }, 2500);
 
     challengeInterval = setInterval(()=>{
       timeLeft--;
@@ -490,17 +473,10 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== ADVANCED AI (shoulder/wrist drop + angle) ==========
-  let calibrationDone = false;
-  let baselineShoulderY = null;
-  let baselineWristY = null;
-  let frameHeight = 250;      // default, will be updated by canvas height
-  const SHOULDER_DROP_THRESHOLD_PERCENT = 0.15;  // 15% of frame height
-  const ANGLE_DOWN_MAX = 100;   // elbow angle must be less than this to confirm down
-  const ANGLE_UP_MIN = 150;     // elbow angle must be more than this to confirm up
-  let aiState = 'up';
-  let lastRepTime = 0;
+  // ========== SIMPLE, FAST ANGLE COUNTER (the one that works) ==========
   let angleBuffer = [];
+  let lastRepTime = 0;
+  let aiState = 'up';
 
   async function startAICamera() {
     const video = document.getElementById('webcam');
@@ -514,19 +490,14 @@ FRONTEND_HTML = """
     video.addEventListener('loadedmetadata', () => {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      frameHeight = canvas.height;
     });
 
     const detectorConfig = { modelType: 'SinglePose.Lightning' };
     aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
 
-    // Reset variables
-    calibrationDone = false;
-    baselineShoulderY = null;
-    baselineWristY = null;
     angleBuffer = [];
-    aiState = 'up';
     lastRepTime = 0;
+    aiState = 'up';
     requestAnimationFrame(detectPose);
   }
 
@@ -563,89 +534,44 @@ FRONTEND_HTML = """
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      // Need at least shoulders and one wrist
-      if (!leftShoulder || !rightShoulder || !leftElbow || !leftWrist || !rightElbow || !rightWrist) {
-        overlay.textContent = '?';
-        overlay.style.display = 'block';
-        requestAnimationFrame(detectPose);
-        return;
-      }
+      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
+        const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+        const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+        const rawAngle = (leftAngle + rightAngle) / 2;
 
-      const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-      const wristY = (leftWrist.y + rightWrist.y) / 2;
-      const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-      const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-      const rawAngle = (leftAngle + rightAngle) / 2;
-
-      // Calibration phase (first 2 seconds)
-      if (!calibrationDone) {
-        // Wait until we have a few frames to get stable baseline
-        if (baselineShoulderY === null) {
-          baselineShoulderY = shoulderY;
-          baselineWristY = wristY;
-        } else {
-          // Smooth baseline by averaging
-          baselineShoulderY = (baselineShoulderY + shoulderY) / 2;
-          baselineWristY = (baselineWristY + wristY) / 2;
-        }
-        // After about 2 seconds, calibration is done
-        if (Date.now() - startTime > 2000) {
-          calibrationDone = true;
-          document.getElementById('calibrationMessage').style.display = 'none';
-        } else {
-          // Still calibrating, show status
-          ctx.fillStyle = '#ffaa00';
-          ctx.font = 'bold 20px Poppins';
-          ctx.fillText('Calibrating…', 20, 40);
-          overlay.textContent = 'HOLD PLANK';
-          overlay.style.display = 'block';
+        angleBuffer.push(rawAngle);
+        if (angleBuffer.length > 5) angleBuffer.shift();
+        const smoothedAngle = movingAverage(angleBuffer, 5);
+        if (smoothedAngle === null) {
           requestAnimationFrame(detectPose);
           return;
         }
-      }
 
-      // Smooth angle
-      angleBuffer.push(rawAngle);
-      if (angleBuffer.length > 5) angleBuffer.shift();
-      const smoothedAngle = movingAverage(angleBuffer, 5);
-      if (smoothedAngle === null) return requestAnimationFrame(detectPose);
+        overlay.textContent = Math.round(smoothedAngle) + '°';
+        overlay.style.display = 'block';
 
-      // Compute shoulder and wrist drop from baseline
-      const shoulderDrop = shoulderY - baselineShoulderY;   // positive means going down (since Y increases downward)
-      const wristDrop = wristY - baselineWristY;
-      const dropThreshold = frameHeight * SHOULDER_DROP_THRESHOLD_PERCENT;
+        const now = Date.now();
 
-      const now = Date.now();
-
-      // Display debug info
-      overlay.textContent = Math.round(smoothedAngle) + '°';
-      overlay.style.display = 'block';
-
-      ctx.font = 'bold 18px Poppins';
-      ctx.fillStyle = '#00ffff';
-      ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(`Shldr drop: ${Math.round(shoulderDrop)} & ${Math.round(wristDrop)}`, 20, 70);
-      ctx.fillText(`State: ${aiState}`, 20, 100);
-
-      // ----- Rep counting logic (based on body drop + angle) -----
-      if (aiState === 'up') {
-        // Check if we are going down: shoulder/wrist drop must exceed threshold AND angle < ANGLE_DOWN_MAX
-        if (shoulderDrop > dropThreshold && wristDrop > dropThreshold && smoothedAngle < ANGLE_DOWN_MAX) {
+        // Count rep when angle crosses from < 90° (down) to > 160° (up)
+        if (aiState === 'up' && smoothedAngle < 90) {
           aiState = 'down';
-        }
-      } else if (aiState === 'down') {
-        // Check if we are going up: shoulder/wrist return close to baseline (within 5% of frameHeight) and angle > ANGLE_UP_MIN
-        if (shoulderDrop < (dropThreshold * 0.3) && wristDrop < (dropThreshold * 0.3) && smoothedAngle > ANGLE_UP_MIN) {
-          if (now - lastRepTime > 400) {
+        } else if (aiState === 'down' && smoothedAngle > 160) {
+          if (now - lastRepTime > 500) {
             repCount++;
             document.getElementById('repCounter').textContent = repCount;
             lastRepTime = now;
-            ctx.fillStyle = '#00ff00';
-            ctx.fillText('REP COUNTED!', 20, 130);
           }
           aiState = 'up';
         }
+
+        ctx.font = 'bold 18px Poppins';
+        ctx.fillStyle = '#00ffff';
+        ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`State: ${aiState}`, 20, 70);
+      } else {
+        overlay.textContent = '?';
+        overlay.style.display = 'block';
       }
     } else {
       overlay.textContent = 'NO POSE';
@@ -751,15 +677,6 @@ FRONTEND_HTML = """
   } else {
     showScreen('setupScreen');
   }
-
-  // Record start time for calibration
-  let startTime = Date.now();
-  // Override startActiveChallenge to set startTime
-  const origStartActiveChallenge = startActiveChallenge;
-  startActiveChallenge = async function() {
-    startTime = Date.now();
-    origStartActiveChallenge();
-  };
 </script>
 </body>
 </html>
