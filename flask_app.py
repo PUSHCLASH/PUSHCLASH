@@ -1,6 +1,6 @@
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, g
 
 # ---------- App definition ----------
@@ -27,11 +27,9 @@ def init_db():
         db = get_db()
         cursor = db.execute("PRAGMA table_info(battles)")
         columns = [row[1] for row in cursor.fetchall()] if cursor else []
-        # Only drop the table if the old schema (nickname/city/state) still exists
         if 'nickname' in columns or 'city' in columns or 'state' in columns:
             db.execute('DROP TABLE IF EXISTS battles')
             db.commit()
-        # Ensure the table exists with the correct columns
         db.execute('''CREATE TABLE IF NOT EXISTS battles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -61,36 +59,39 @@ def record_battle():
 @app.route('/api/leaderboard')
 def leaderboard():
     db = get_db()
-    # Weekly leaderboard: only battles from the last 7 days
-    # Get max score per email, then join back to get the date of that score
-    rows = db.execute('''
-        SELECT b.name, b.nationality, t.max_score, b.timestamp as best_date
-        FROM (
-            SELECT email, MAX(score) as max_score
-            FROM battles
-            WHERE timestamp >= datetime('now', '-7 days')
-            GROUP BY email
-        ) t
-        LEFT JOIN battles b ON b.email = t.email
-            AND b.score = t.max_score
-            AND b.timestamp >= datetime('now', '-7 days')
-        GROUP BY t.email
-        ORDER BY t.max_score DESC
-        LIMIT 10
-    ''').fetchall()
-    result = []
+    # Fetch all battles from the last 7 days
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    rows = db.execute(
+        'SELECT name, nationality, email, score, timestamp FROM battles WHERE timestamp >= ? ORDER BY timestamp DESC',
+        (seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'),)
+    ).fetchall()
+
+    # Compute personal best and its date for each email
+    best_map = {}  # email -> {score, name, nationality, date}
     for r in rows:
+        email = r['email']
+        if email not in best_map or r['score'] > best_map[email]['score']:
+            best_map[email] = {
+                'name': r['name'],
+                'nationality': r['nationality'],
+                'score': r['score'],
+                'date': r['timestamp']
+            }
+    # Sort by score descending, pick top 10
+    sorted_best = sorted(best_map.values(), key=lambda x: x['score'], reverse=True)[:10]
+    result = []
+    for entry in sorted_best:
         date_str = ''
-        if r['best_date']:
+        if entry['date']:
             try:
-                dt = datetime.strptime(r['best_date'], '%Y-%m-%d %H:%M:%S')
+                dt = datetime.strptime(entry['date'], '%Y-%m-%d %H:%M:%S')
                 date_str = dt.strftime('%b %d')
             except:
                 pass
         result.append({
-            'name': r['name'],
-            'nationality': r['nationality'],
-            'score': r['max_score'],
+            'name': entry['name'],
+            'nationality': entry['nationality'],
+            'score': entry['score'],
             'date': date_str
         })
     return jsonify(result)
@@ -104,17 +105,16 @@ def user_stats():
     db = get_db()
     total = db.execute('SELECT COUNT(*) as total FROM battles WHERE email=?', (email,)).fetchone()['total']
     best = db.execute('SELECT MAX(score) as best FROM battles WHERE email=?', (email,)).fetchone()['best'] or 0
-    # Weekly rank among all users
+    # Weekly rank
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
     rank_row = db.execute('''
-        SELECT COUNT(DISTINCT email) + 1 as rank FROM battles b1
-        WHERE b1.timestamp >= datetime('now', '-7 days')
-          AND b1.score > (SELECT COALESCE(MAX(score),0) FROM battles b2
-                          WHERE b2.email=? AND b2.timestamp >= datetime('now', '-7 days'))
-    ''', (email,)).fetchone()
+        SELECT COUNT(DISTINCT email) + 1 as rank FROM battles
+        WHERE timestamp >= ? AND score > (SELECT COALESCE(MAX(score),0) FROM battles WHERE email=? AND timestamp >= ?)
+    ''', (seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'), email, seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'))).fetchone()
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (fixed leaderboard + deep voice after battle) ----------
+# ---------- Frontend (unchanged except the new leaderboard & champion voice already present) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -355,7 +355,6 @@ FRONTEND_HTML = """
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
-  // ---------- Voice assistants ----------
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
     msg.lang = 'en-US';
@@ -370,16 +369,14 @@ FRONTEND_HTML = """
   function speakChampion() {
     const msg = new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger.");
     msg.lang = 'en-US';
-    msg.rate = 0.85;  // slower, deeper
-    msg.pitch = 0.8;   // deep male voice
+    msg.rate = 0.85;
+    msg.pitch = 0.8;
     const voices = speechSynthesis.getVoices();
-    // Choose a deep male voice if available
     const maleVoice = voices.find(v => v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('google uk male') || v.name.toLowerCase().includes('microsoft david') || v.name.toLowerCase().includes('daniel'));
     if (maleVoice) msg.voice = maleVoice;
     speechSynthesis.speak(msg);
   }
 
-  // ---------- Profile & Navigation ----------
   function saveProfile(){
     const name = document.getElementById('nameInput').value.trim();
     const nationality = document.getElementById('nationalityInput').value.trim();
@@ -439,7 +436,6 @@ FRONTEND_HTML = """
     document.getElementById('totalBattles').textContent = data.totalBattles;
   }
 
-  // ---------- Challenge Start ----------
   async function startChallenge(mode) {
     challengeMode = mode;
     showScreen('challengeScreen');
@@ -482,7 +478,7 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== SIMPLE ELBOW‑ANGLE CROSSING ==========
+  // Angle-based counter (simple, working)
   let angleBuffer = [];
   let lastRepTime = 0;
   let aiState = 'up';
@@ -620,7 +616,6 @@ FRONTEND_HTML = """
     }
   }
 
-  // ---------- End Battle with Champion Voice ----------
   async function endBattle(){
     if (aiStream) {
       aiStream.getTracks().forEach(track => track.stop());
@@ -631,11 +626,8 @@ FRONTEND_HTML = """
     document.getElementById('finalScore').textContent = repCount;
     document.getElementById('trashTalk').textContent = trashTalks[Math.floor(Math.random()*trashTalks.length)];
 
-    // Show champion text with animation
     const championDiv = document.getElementById('championText');
     championDiv.style.display = 'block';
-
-    // Speak deep, heroic line
     speakChampion();
 
     await fetch('/api/battle', {
@@ -649,7 +641,6 @@ FRONTEND_HTML = """
       })
     });
 
-    // Hide champion text after a few seconds if desired (optional)
     setTimeout(() => {
       championDiv.style.display = 'none';
     }, 5000);
@@ -660,7 +651,6 @@ FRONTEND_HTML = """
     navigator.clipboard.writeText(text).then(()=>alert('Link copied!'));
   }
 
-  // ---------- Weekly Leaderboard (with date) ----------
   async function showLeaderboard(){
     showScreen('leaderboardScreen');
     const res = await fetch('/api/leaderboard');
