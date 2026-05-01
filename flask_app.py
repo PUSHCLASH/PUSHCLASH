@@ -109,7 +109,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (final, robust AI counter) ----------
+# ---------- Frontend (diagnostic overlay) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -283,6 +283,17 @@ FRONTEND_HTML = """
       0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
       50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
       100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+    }
+    /* Diagnostic labels */
+    .diag-label {
+      position: absolute;
+      left: 8px;
+      font-size: 14px;
+      font-family: monospace;
+      background: rgba(0,0,0,0.7);
+      padding: 2px 5px;
+      border-radius: 4px;
+      pointer-events: none;
     }
   </style>
 </head>
@@ -491,14 +502,14 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== ADVANCED, RELIABLE ANGLE COUNTER (no "NO POSE" overlay) ==========
+  // ========== DIAGNOSTIC ANGLE COUNTER ==========
   let angleBuffer = [];
   let lastRepTime = 0;
   let isDown = false;
-  const ANGLE_DOWN_THRESHOLD = 100;   // more forgiving than 90
-  const ANGLE_UP_THRESHOLD = 150;     // more forgiving than 160
+  const ANGLE_DOWN_THRESHOLD = 105;   // a bit wider
+  const ANGLE_UP_THRESHOLD = 145;     // lower to catch more push-ups
   const MIN_REP_INTERVAL = 400;       // ms
-  const MIN_CONFIDENCE = 0.5;         // lower threshold to accept keypoints
+  const MIN_CONFIDENCE = 0.5;         // lower confidence tolerance
 
   async function startAICamera() {
     const video = document.getElementById('webcam');
@@ -546,7 +557,6 @@ FRONTEND_HTML = """
     const poses = await aiDetector.estimatePoses(video, { flipHorizontal: false });
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // We no longer show "NO POSE" – if no poses, just leave the previous angle or show nothing.
     if (poses.length > 0) {
       const keypoints = poses[0].keypoints;
       drawSkeleton(ctx, keypoints);
@@ -558,7 +568,16 @@ FRONTEND_HTML = """
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      // Check if all needed keypoints are present with reasonable confidence
+      // Draw raw coordinates for debugging
+      if (leftShoulder && rightShoulder && leftElbow && rightElbow) {
+        ctx.font = '12px monospace';
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fillText(`LSh: ${leftShoulder.x.toFixed(2)},${leftShoulder.y.toFixed(2)}`, 10, 20);
+        ctx.fillText(`RSh: ${rightShoulder.x.toFixed(2)},${rightShoulder.y.toFixed(2)}`, 10, 35);
+        ctx.fillText(`LEl: ${leftElbow.x.toFixed(2)},${leftElbow.y.toFixed(2)}`, 10, 50);
+        ctx.fillText(`REl: ${rightElbow.x.toFixed(2)},${rightElbow.y.toFixed(2)}`, 10, 65);
+      }
+
       if (leftShoulder && rightShoulder && leftElbow && leftWrist && rightElbow && rightWrist &&
           leftShoulder.score > MIN_CONFIDENCE && rightShoulder.score > MIN_CONFIDENCE &&
           leftElbow.score > MIN_CONFIDENCE && leftWrist.score > MIN_CONFIDENCE &&
@@ -572,7 +591,6 @@ FRONTEND_HTML = """
         if (angleBuffer.length > 3) angleBuffer.shift();
         const smoothedAngle = movingAverage(angleBuffer, 3);
         if (smoothedAngle !== null) {
-          // Show the angle
           overlay.textContent = Math.round(smoothedAngle) + '°';
           overlay.style.display = 'block';
 
@@ -587,25 +605,27 @@ FRONTEND_HTML = """
               document.getElementById('repCounter').textContent = repCount;
               lastRepTime = now;
 
-              // Rep flash effect
               flash.style.display = 'block';
               setTimeout(() => { flash.style.display = 'none'; }, 800);
             }
             isDown = false;
           }
 
-          // Debug info (just angle, no state)
+          // Show state & angle on canvas
           ctx.font = 'bold 18px Poppins';
           ctx.fillStyle = '#00ffff';
-          ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
+          ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 80);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(`State: ${isDown ? 'DOWN' : 'UP'}`, 20, 105);
+          ctx.fillText(`Reps: ${repCount}`, 20, 130);
         }
       } else {
-        // Not all keypoints confident – keep previous angle if any
-        if (overlay.textContent === '' || overlay.textContent === '?') {
-          overlay.textContent = '?';
-          overlay.style.display = 'block';
-        }
+        // Show question mark but don't block
+        overlay.textContent = '?';
+        overlay.style.display = 'block';
       }
+    } else {
+      // Keep previous overlay value, don't show NO POSE
     }
 
     requestAnimationFrame(detectPose);
