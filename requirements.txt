@@ -1,6 +1,4 @@
 flask
-flask-socketio
-mediapipe
-opencv-python-headless
-numpy
+
+
 
