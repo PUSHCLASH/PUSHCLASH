@@ -6,14 +6,23 @@ import numpy as np
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, g
 from flask_socketio import SocketIO, emit
-import mediapipe as mp
-import math
 from collections import deque
+import traceback
+
+# ---------- Safe MediaPipe import ----------
+try:
+    import mediapipe as mp
+    # Check if solutions is actually available
+    _ = mp.solutions.pose
+    MEDIAPIPE_AVAILABLE = True
+except (ImportError, AttributeError) as e:
+    print(f"MediaPipe not fully available: {e}")
+    MEDIAPIPE_AVAILABLE = False
 
 # ---------- Flask & SocketIO setup ----------
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'pushclash-secret'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # ---------- Database setup ----------
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pushclash.db')
@@ -49,9 +58,11 @@ def init_db():
         )''')
         db.commit()
 
-# ---------- Push‑up counter class ----------
+# ---------- Push‑up counter class (only if MediaPipe is available) ----------
 class PushUpCounter:
     def __init__(self):
+        if not MEDIAPIPE_AVAILABLE:
+            raise RuntimeError("MediaPipe is not available. Check server installation.")
         self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(
             static_image_mode=False,
@@ -124,13 +135,15 @@ class PushUpCounter:
         self.angle_buffer.clear()
         self.angle = 180.0
 
-# Create a global counter instance (one per server – fine for single-user)
-counter = PushUpCounter()
+# Global counter – only create if MediaPipe is available
+counter = PushUpCounter() if MEDIAPIPE_AVAILABLE else None
 
 # ---------- WebSocket events ----------
 @socketio.on('frame')
 def handle_frame(data):
-    # data: { image: base64 string, timestamp: ms }
+    if counter is None:
+        emit('error', {'message': 'AI engine not available on server'})
+        return
     try:
         img_b64 = data['image'].split(',')[1] if ',' in data['image'] else data['image']
         img_bytes = base64.b64decode(img_b64)
@@ -147,11 +160,12 @@ def handle_frame(data):
             'angle': round(angle, 1)
         })
     except Exception as e:
-        print('Frame error:', e)
+        print('Frame error:', traceback.format_exc())
 
 @socketio.on('start_battle')
 def handle_start_battle():
-    counter.reset()
+    if counter:
+        counter.reset()
     emit('reset_confirmed')
 
 # ---------- HTTP API Endpoints ----------
@@ -223,7 +237,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Serve the HTML page (embedded, containing the client-side WebSocket logic) ----------
+# ---------- Frontend (unchanged battle theme, now with WebSocket AI) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -263,13 +277,7 @@ FRONTEND_HTML = """
       text-shadow: 0 0 20px #ff00ff;
       letter-spacing: 2px;
     }
-    .arena-subtitle {
-      text-align: center;
-      color: #aaa;
-      font-size: 0.9rem;
-      margin-bottom: 24px;
-      letter-spacing: 1px;
-    }
+    .arena-subtitle { text-align: center; color: #aaa; font-size: 0.9rem; margin-bottom: 24px; letter-spacing: 1px; }
     .screen { display: none; }
     .screen.active { display: block; }
     .battle-input {
@@ -389,7 +397,6 @@ FRONTEND_HTML = """
 </head>
 <body>
 <div class="app-container" id="app">
-  <!-- Setup Screen -->
   <div id="setupScreen" class="screen active">
     <h1>PUSHCLASH</h1>
     <div class="arena-subtitle">⚔️ ENTER THE ARENA ⚔️</div>
@@ -401,8 +408,6 @@ FRONTEND_HTML = """
     <button class="btn-primary" onclick="saveProfile()">⚡ ENTER ARENA ⚡</button>
     <p class="small" style="text-align:center; margin-top:16px;">Only real warriors dare to compete</p>
   </div>
-
-  <!-- Dashboard Screen -->
   <div id="dashboardScreen" class="screen">
     <h1>PUSHCLASH</h1>
     <p style="font-size:1.4rem;">Welcome, <span id="dashName"></span>!</p>
@@ -422,8 +427,6 @@ FRONTEND_HTML = """
     <button class="btn-secondary" onclick="resetProfile()">🔄 Leave Arena</button>
     <div class="success-msg" id="saveConfirmation" style="display:none;">✅ Score saved to global arena!</div>
   </div>
-
-  <!-- Challenge Screen -->
   <div id="challengeScreen" class="screen">
     <div id="countdownDisplay" class="timer-big" style="font-size:4rem;">3</div>
     <div id="challengeActiveUI" style="display:none;">
@@ -444,8 +447,6 @@ FRONTEND_HTML = """
       <button class="btn-secondary" onclick="goToDashboard()">Back to Arena</button>
     </div>
   </div>
-
-  <!-- Leaderboard Screen -->
   <div id="leaderboardScreen" class="screen">
     <h1>WEEKLY RANKINGS</h1>
     <p class="small" style="text-align:center;">Top 10 of the last 7 days</p>
@@ -454,7 +455,6 @@ FRONTEND_HTML = """
   </div>
 </div>
 
-<!-- Socket.IO client library -->
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <script>
@@ -469,7 +469,6 @@ FRONTEND_HTML = """
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
-  // ---------- Voice functions ----------
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
     msg.lang = 'en-US'; msg.rate = 0.9; msg.pitch = 1.1;
@@ -487,7 +486,6 @@ FRONTEND_HTML = """
     speechSynthesis.speak(msg);
   }
 
-  // ---------- User & navigation ----------
   function saveProfile(){
     const name = document.getElementById('nameInput').value.trim();
     const nationality = document.getElementById('nationalityInput').value.trim();
@@ -534,7 +532,6 @@ FRONTEND_HTML = """
     document.getElementById('totalBattles').textContent = data.totalBattles;
   }
 
-  // ---------- Challenge start ----------
   async function startChallenge() {
     showScreen('challengeScreen');
     document.getElementById('countdownDisplay').style.display='block';
@@ -565,11 +562,8 @@ FRONTEND_HTML = """
     document.getElementById('repCounter').textContent='0';
     document.getElementById('aiCameraUI').style.display='block';
 
-    // Connect to WebSocket and start sending frames
     socket = io();
-    socket.on('connect', () => {
-      socket.emit('start_battle');
-    });
+    socket.on('connect', () => { socket.emit('start_battle'); });
     socket.on('update', (data) => {
       if (data.total_reps !== repCount) {
         repCount = data.total_reps;
@@ -583,8 +577,10 @@ FRONTEND_HTML = """
       document.getElementById('angleOverlay').textContent = Math.round(data.angle) + '°';
       document.getElementById('angleOverlay').style.display = 'block';
     });
+    socket.on('error', (data) => {
+      alert(data.message);
+    });
 
-    // Start webcam and streaming
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: {ideal: 320}, height: {ideal: 240} } });
       const video = document.getElementById('webcam');
@@ -593,7 +589,7 @@ FRONTEND_HTML = """
       streaming = true;
       captureAndSend();
     } catch(e) {
-      alert('Camera access denied or not available.');
+      alert('Camera access denied.');
     }
 
     challengeInterval = setInterval(()=>{
@@ -681,7 +677,6 @@ FRONTEND_HTML = """
     }).join('');
   }
 
-  // Init
   currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
   if(currentUser){
     showScreen('dashboardScreen');
@@ -698,8 +693,8 @@ FRONTEND_HTML = """
 def index():
     return FRONTEND_HTML
 
-# ---------- Start server ----------
 if __name__ == '__main__':
     with app.app_context():
         init_db()
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
