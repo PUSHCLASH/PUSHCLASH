@@ -1,10 +1,19 @@
 import sqlite3
 import os
+import base64
+import cv2
+import numpy as np
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, g
+from flask import Flask, render_template, request, jsonify, g
+from flask_socketio import SocketIO, emit
+import mediapipe as mp
+import math
+from collections import deque
 
-# ---------- App definition ----------
+# ---------- Flask & SocketIO setup ----------
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'pushclash-secret'
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # ---------- Database setup ----------
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pushclash.db')
@@ -40,7 +49,112 @@ def init_db():
         )''')
         db.commit()
 
-# ---------- API Endpoints (unchanged) ----------
+# ---------- Push‑up counter class ----------
+class PushUpCounter:
+    def __init__(self):
+        self.mp_pose = mp.solutions.pose
+        self.pose = self.mp_pose.Pose(
+            static_image_mode=False,
+            model_complexity=2,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6
+        )
+        self.state = 'up'
+        self.rep_count = 0
+        self.last_transition_time = 0
+        self.angle_buffer = deque(maxlen=5)
+        self.angle = 180.0
+        self.down_threshold = 85
+        self.up_threshold = 155
+        self.min_rep_interval = 0.4
+
+    def process_frame(self, frame_rgb, timestamp_ms):
+        results = self.pose.process(frame_rgb)
+        rep_added = False
+
+        if results.pose_landmarks:
+            landmarks = results.pose_landmarks.landmark
+
+            def get_point(landmark_id):
+                lm = landmarks[landmark_id]
+                return (lm.x, lm.y) if lm.visibility > 0.5 else None
+
+            left_shoulder = get_point(self.mp_pose.PoseLandmark.LEFT_SHOULDER)
+            right_shoulder = get_point(self.mp_pose.PoseLandmark.RIGHT_SHOULDER)
+            left_elbow = get_point(self.mp_pose.PoseLandmark.LEFT_ELBOW)
+            right_elbow = get_point(self.mp_pose.PoseLandmark.RIGHT_ELBOW)
+            left_wrist = get_point(self.mp_pose.PoseLandmark.LEFT_WRIST)
+            right_wrist = get_point(self.mp_pose.PoseLandmark.RIGHT_WRIST)
+
+            if left_shoulder and left_elbow and left_wrist and right_shoulder and right_elbow and right_wrist:
+                left_angle = self._calculate_angle(left_shoulder, left_elbow, left_wrist)
+                right_angle = self._calculate_angle(right_shoulder, right_elbow, right_wrist)
+                current_angle = (left_angle + right_angle) / 2.0
+
+                self.angle_buffer.append(current_angle)
+                smoothed_angle = np.mean(self.angle_buffer)
+                self.angle = smoothed_angle
+
+                now_seconds = timestamp_ms / 1000.0
+                if self.state == 'up' and smoothed_angle < self.down_threshold:
+                    self.state = 'down'
+                elif self.state == 'down' and smoothed_angle > self.up_threshold:
+                    if now_seconds - self.last_transition_time > self.min_rep_interval:
+                        self.rep_count += 1
+                        rep_added = True
+                    self.last_transition_time = now_seconds
+                    self.state = 'up'
+
+        return rep_added, self.rep_count, self.angle
+
+    def _calculate_angle(self, a, b, c):
+        a = np.array(a)
+        b = np.array(b)
+        c = np.array(c)
+        radians = math.atan2(c[1] - b[1], c[0] - b[0]) - math.atan2(a[1] - b[1], a[0] - b[0])
+        angle = math.degrees(abs(radians))
+        if angle > 180.0:
+            angle = 360 - angle
+        return angle
+
+    def reset(self):
+        self.state = 'up'
+        self.rep_count = 0
+        self.last_transition_time = 0
+        self.angle_buffer.clear()
+        self.angle = 180.0
+
+# Create a global counter instance (one per server – fine for single-user)
+counter = PushUpCounter()
+
+# ---------- WebSocket events ----------
+@socketio.on('frame')
+def handle_frame(data):
+    # data: { image: base64 string, timestamp: ms }
+    try:
+        img_b64 = data['image'].split(',')[1] if ',' in data['image'] else data['image']
+        img_bytes = base64.b64decode(img_b64)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        timestamp = data['timestamp']
+        rep_added, total_reps, angle = counter.process_frame(frame_rgb, timestamp)
+        emit('update', {
+            'rep_added': rep_added,
+            'total_reps': total_reps,
+            'angle': round(angle, 1)
+        })
+    except Exception as e:
+        print('Frame error:', e)
+
+@socketio.on('start_battle')
+def handle_start_battle():
+    counter.reset()
+    emit('reset_confirmed')
+
+# ---------- HTTP API Endpoints ----------
 @app.route('/api/battle', methods=['POST'])
 def record_battle():
     data = request.get_json()
@@ -109,7 +223,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (diagnostic overlay) ----------
+# ---------- Serve the HTML page (embedded, containing the client-side WebSocket logic) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -158,7 +272,6 @@ FRONTEND_HTML = """
     }
     .screen { display: none; }
     .screen.active { display: block; }
-
     .battle-input {
       width: 100%;
       padding: 15px 18px;
@@ -205,7 +318,6 @@ FRONTEND_HTML = """
       transition: 0.2s;
     }
     .btn-secondary:hover { background: rgba(0,255,255,0.1); }
-
     .timer-big { font-size:5rem; text-align:center; font-weight:800; color:#00ffff; text-shadow:0 0 30px cyan; }
     .counter-big { font-size:4rem; text-align:center; font-weight:800; color:#ff00ff; }
     .tabs { display:flex; gap:8px; margin:16px 0; }
@@ -234,28 +346,17 @@ FRONTEND_HTML = """
     nav button { flex:1; font-size:0.8rem; padding:10px; }
     video, canvas { width:100%; border-radius:14px; display:none; }
     #aiCameraUI { position:relative; width:100%; height:250px; margin:10px 0; border-radius:14px; overflow:hidden; }
-    #aiCameraUI video, #aiCameraUI canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
+    #aiCameraUI video { display:block; position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
     .mode-choice { display:flex; gap:10px; margin:20px 0; }
     .mode-choice button { flex:1; }
-
     .arena-shield {
       font-size: 3rem;
       text-align: center;
       margin-bottom: 10px;
       filter: drop-shadow(0 0 20px #ff00ff);
     }
-    .error-msg {
-      color: #ff4444;
-      font-size: 0.8rem;
-      text-align: center;
-      margin: 5px 0;
-    }
-    .success-msg {
-      color: #00ff88;
-      font-size: 0.9rem;
-      text-align: center;
-      margin: 10px 0;
-    }
+    .error-msg { color: #ff4444; font-size: 0.8rem; text-align: center; margin: 5px 0; }
+    .success-msg { color: #00ff88; font-size: 0.9rem; text-align: center; margin: 10px 0; }
     .angle-overlay {
       position: absolute;
       top: 50%;
@@ -284,17 +385,6 @@ FRONTEND_HTML = """
       50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
       100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
     }
-    /* Diagnostic labels */
-    .diag-label {
-      position: absolute;
-      left: 8px;
-      font-size: 14px;
-      font-family: monospace;
-      background: rgba(0,0,0,0.7);
-      padding: 2px 5px;
-      border-radius: 4px;
-      pointer-events: none;
-    }
   </style>
 </head>
 <body>
@@ -312,7 +402,7 @@ FRONTEND_HTML = """
     <p class="small" style="text-align:center; margin-top:16px;">Only real warriors dare to compete</p>
   </div>
 
-  <!-- Dashboard -->
+  <!-- Dashboard Screen -->
   <div id="dashboardScreen" class="screen">
     <h1>PUSHCLASH</h1>
     <p style="font-size:1.4rem;">Welcome, <span id="dashName"></span>!</p>
@@ -327,7 +417,7 @@ FRONTEND_HTML = """
         <div class="small">Total Battles</div>
       </div>
     </div>
-    <button class="btn-primary" onclick="startChallenge('ai')">🤖 START AI BATTLE</button>
+    <button class="btn-primary" onclick="startChallenge()">🤖 START AI BATTLE</button>
     <button class="btn-secondary" onclick="showLeaderboard()">🏆 Weekly Leaderboard</button>
     <button class="btn-secondary" onclick="resetProfile()">🔄 Leave Arena</button>
     <div class="success-msg" id="saveConfirmation" style="display:none;">✅ Score saved to global arena!</div>
@@ -341,10 +431,9 @@ FRONTEND_HTML = """
       <div class="counter-big" id="repCounter">0</div>
       <div id="aiCameraUI">
         <video id="webcam" autoplay playsinline></video>
-        <canvas id="poseCanvas"></canvas>
-        <div class="angle-overlay" id="angleOverlay"></div>
-        <div class="rep-flash" id="repFlash" style="display:none;">REP!</div>
       </div>
+      <div class="angle-overlay" id="angleOverlay"></div>
+      <div class="rep-flash" id="repFlash" style="display:none;">REP!</div>
     </div>
     <div id="battleResultUI" style="display:none; text-align:center;">
       <h2>⚔️ Battle Over!</h2>
@@ -365,55 +454,47 @@ FRONTEND_HTML = """
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
+<!-- Socket.IO client library -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <script>
   let currentUser = null;
   let repCount = 0;
   let timeLeft = 60;
   let challengeInterval, countdownInterval;
-  let challengeMode = 'ai';
-  let aiDetector = null;
-  let aiStream = null;
+  let socket;
+  let streaming = false;
+  let localStream = null;
+
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
+  // ---------- Voice functions ----------
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
-    msg.lang = 'en-US';
-    msg.rate = 0.9;
-    msg.pitch = 1.1;
+    msg.lang = 'en-US'; msg.rate = 0.9; msg.pitch = 1.1;
     const voices = speechSynthesis.getVoices();
     const femaleVoice = voices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha') || v.name.toLowerCase().includes('google uk female') || v.name.toLowerCase().includes('microsoft zira'));
     if (femaleVoice) msg.voice = femaleVoice;
     speechSynthesis.speak(msg);
   }
-
   function speakChampion() {
     const msg = new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger.");
-    msg.lang = 'en-US';
-    msg.rate = 0.85;
-    msg.pitch = 0.8;
+    msg.lang = 'en-US'; msg.rate = 0.85; msg.pitch = 0.8;
     const voices = speechSynthesis.getVoices();
     const maleVoice = voices.find(v => v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('google uk male') || v.name.toLowerCase().includes('microsoft david') || v.name.toLowerCase().includes('daniel'));
     if (maleVoice) msg.voice = maleVoice;
     speechSynthesis.speak(msg);
   }
 
+  // ---------- User & navigation ----------
   function saveProfile(){
     const name = document.getElementById('nameInput').value.trim();
     const nationality = document.getElementById('nationalityInput').value.trim();
     const email = document.getElementById('emailInput').value.trim();
     const errorDiv = document.getElementById('setupError');
-    if(!name || !nationality || !email) {
-      errorDiv.textContent = 'All fields are required!';
-      return;
-    }
-    if(!email.includes('@') || !email.includes('.')) {
-      errorDiv.textContent = 'Please enter a valid email';
-      return;
-    }
+    if(!name || !nationality || !email) { errorDiv.textContent = 'All fields are required!'; return; }
+    if(!email.includes('@') || !email.includes('.')) { errorDiv.textContent = 'Please enter a valid email'; return; }
     errorDiv.textContent = '';
     currentUser = {name, nationality, email};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
@@ -421,13 +502,11 @@ FRONTEND_HTML = """
     showScreen('dashboardScreen');
     loadStats();
   }
-
   function resetProfile(){
     localStorage.removeItem('pushclash_user');
     currentUser=null;
     showScreen('setupScreen');
   }
-
   function showScreen(id){
     document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
     document.getElementById(id).classList.add('active');
@@ -436,16 +515,11 @@ FRONTEND_HTML = """
       if(conf) conf.style.display = 'none';
     }
   }
-
   function goToDashboard(){
-    if (aiStream) {
-      aiStream.getTracks().forEach(track => track.stop());
-      aiStream = null;
-    }
+    stopStreaming();
     loadStats();
     showScreen('dashboardScreen');
   }
-
   async function loadStats(){
     if(!currentUser) return;
     document.getElementById('dashName').textContent = currentUser.name;
@@ -460,8 +534,8 @@ FRONTEND_HTML = """
     document.getElementById('totalBattles').textContent = data.totalBattles;
   }
 
-  async function startChallenge(mode) {
-    challengeMode = mode;
+  // ---------- Challenge start ----------
+  async function startChallenge() {
     showScreen('challengeScreen');
     document.getElementById('countdownDisplay').style.display='block';
     document.getElementById('challengeActiveUI').style.display='none';
@@ -490,7 +564,37 @@ FRONTEND_HTML = """
     document.getElementById('timerDisplay').textContent=timeLeft;
     document.getElementById('repCounter').textContent='0';
     document.getElementById('aiCameraUI').style.display='block';
-    await startAICamera();
+
+    // Connect to WebSocket and start sending frames
+    socket = io();
+    socket.on('connect', () => {
+      socket.emit('start_battle');
+    });
+    socket.on('update', (data) => {
+      if (data.total_reps !== repCount) {
+        repCount = data.total_reps;
+        document.getElementById('repCounter').textContent = repCount;
+        if (data.rep_added) {
+          const flash = document.getElementById('repFlash');
+          flash.style.display = 'block';
+          setTimeout(() => { flash.style.display = 'none'; }, 800);
+        }
+      }
+      document.getElementById('angleOverlay').textContent = Math.round(data.angle) + '°';
+      document.getElementById('angleOverlay').style.display = 'block';
+    });
+
+    // Start webcam and streaming
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: {ideal: 320}, height: {ideal: 240} } });
+      const video = document.getElementById('webcam');
+      video.srcObject = localStream;
+      await video.play();
+      streaming = true;
+      captureAndSend();
+    } catch(e) {
+      alert('Camera access denied or not available.');
+    }
 
     challengeInterval = setInterval(()=>{
       timeLeft--;
@@ -502,176 +606,37 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== DIAGNOSTIC ANGLE COUNTER ==========
-  let angleBuffer = [];
-  let lastRepTime = 0;
-  let isDown = false;
-  const ANGLE_DOWN_THRESHOLD = 105;   // a bit wider
-  const ANGLE_UP_THRESHOLD = 145;     // lower to catch more push-ups
-  const MIN_REP_INTERVAL = 400;       // ms
-  const MIN_CONFIDENCE = 0.5;         // lower confidence tolerance
-
-  async function startAICamera() {
+  function captureAndSend() {
+    if (!streaming) return;
     const video = document.getElementById('webcam');
-    const canvas = document.getElementById('poseCanvas');
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 320;
+    canvas.height = video.videoHeight || 240;
     const ctx = canvas.getContext('2d');
-
-    aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-    video.srcObject = aiStream;
-    await video.play();
-
-    video.addEventListener('loadedmetadata', () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    });
-
-    const detectorConfig = { modelType: 'SinglePose.Lightning' };
-    aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
-
-    angleBuffer = [];
-    lastRepTime = 0;
-    isDown = false;
-    requestAnimationFrame(detectPose);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataURL = canvas.toDataURL('image/jpeg', 0.6);
+    socket.emit('frame', { image: dataURL, timestamp: Date.now() });
+    requestAnimationFrame(captureAndSend);
   }
 
-  function movingAverage(arr, N) {
-    const recent = arr.slice(-N);
-    if (recent.length === 0) return null;
-    return recent.reduce((sum, val) => sum + val, 0) / recent.length;
-  }
-
-  async function detectPose() {
-    if (timeLeft <= 0 || !aiDetector || !aiStream) return;
-
-    const video = document.getElementById('webcam');
-    const canvas = document.getElementById('poseCanvas');
-    const ctx = canvas.getContext('2d');
-    const overlay = document.getElementById('angleOverlay');
-    const flash = document.getElementById('repFlash');
-
-    if (video.readyState < 2) {
-      requestAnimationFrame(detectPose);
-      return;
+  function stopStreaming() {
+    streaming = false;
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      localStream = null;
     }
-
-    const poses = await aiDetector.estimatePoses(video, { flipHorizontal: false });
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (poses.length > 0) {
-      const keypoints = poses[0].keypoints;
-      drawSkeleton(ctx, keypoints);
-
-      const leftShoulder = keypoints[5];
-      const rightShoulder = keypoints[6];
-      const leftElbow = keypoints[7];
-      const leftWrist = keypoints[9];
-      const rightElbow = keypoints[8];
-      const rightWrist = keypoints[10];
-
-      // Draw raw coordinates for debugging
-      if (leftShoulder && rightShoulder && leftElbow && rightElbow) {
-        ctx.font = '12px monospace';
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.fillText(`LSh: ${leftShoulder.x.toFixed(2)},${leftShoulder.y.toFixed(2)}`, 10, 20);
-        ctx.fillText(`RSh: ${rightShoulder.x.toFixed(2)},${rightShoulder.y.toFixed(2)}`, 10, 35);
-        ctx.fillText(`LEl: ${leftElbow.x.toFixed(2)},${leftElbow.y.toFixed(2)}`, 10, 50);
-        ctx.fillText(`REl: ${rightElbow.x.toFixed(2)},${rightElbow.y.toFixed(2)}`, 10, 65);
-      }
-
-      if (leftShoulder && rightShoulder && leftElbow && leftWrist && rightElbow && rightWrist &&
-          leftShoulder.score > MIN_CONFIDENCE && rightShoulder.score > MIN_CONFIDENCE &&
-          leftElbow.score > MIN_CONFIDENCE && leftWrist.score > MIN_CONFIDENCE &&
-          rightElbow.score > MIN_CONFIDENCE && rightWrist.score > MIN_CONFIDENCE) {
-
-        const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-        const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-        const rawAngle = (leftAngle + rightAngle) / 2;
-
-        angleBuffer.push(rawAngle);
-        if (angleBuffer.length > 3) angleBuffer.shift();
-        const smoothedAngle = movingAverage(angleBuffer, 3);
-        if (smoothedAngle !== null) {
-          overlay.textContent = Math.round(smoothedAngle) + '°';
-          overlay.style.display = 'block';
-
-          const now = Date.now();
-
-          // State machine
-          if (!isDown && smoothedAngle < ANGLE_DOWN_THRESHOLD) {
-            isDown = true;
-          } else if (isDown && smoothedAngle > ANGLE_UP_THRESHOLD) {
-            if (now - lastRepTime > MIN_REP_INTERVAL) {
-              repCount++;
-              document.getElementById('repCounter').textContent = repCount;
-              lastRepTime = now;
-
-              flash.style.display = 'block';
-              setTimeout(() => { flash.style.display = 'none'; }, 800);
-            }
-            isDown = false;
-          }
-
-          // Show state & angle on canvas
-          ctx.font = 'bold 18px Poppins';
-          ctx.fillStyle = '#00ffff';
-          ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 80);
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(`State: ${isDown ? 'DOWN' : 'UP'}`, 20, 105);
-          ctx.fillText(`Reps: ${repCount}`, 20, 130);
-        }
-      } else {
-        // Show question mark but don't block
-        overlay.textContent = '?';
-        overlay.style.display = 'block';
-      }
-    } else {
-      // Keep previous overlay value, don't show NO POSE
-    }
-
-    requestAnimationFrame(detectPose);
-  }
-
-  function calculateAngle(a, b, c) {
-    const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-    let angle = Math.abs(radians * 180.0 / Math.PI);
-    if (angle > 180.0) angle = 360 - angle;
-    return angle;
-  }
-
-  function drawSkeleton(ctx, keypoints) {
-    const adjacentKeyPoints = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
-    ctx.strokeStyle = '#00ffff';
-    ctx.lineWidth = 2;
-    for (const pair of adjacentKeyPoints) {
-      const p1 = keypoints[pair[0]];
-      const p2 = keypoints[pair[1]];
-      if (p1.score > 0.3 && p2.score > 0.3) {
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      }
-    }
-    for (const kp of keypoints) {
-      if (kp.score > 0.3) {
-        ctx.fillStyle = '#ff00ff';
-        ctx.beginPath();
-        ctx.arc(kp.x, kp.y, 4, 0, 2 * Math.PI);
-        ctx.fill();
-      }
+    if (socket) {
+      socket.disconnect();
+      socket = null;
     }
   }
 
   async function endBattle(){
-    if (aiStream) {
-      aiStream.getTracks().forEach(track => track.stop());
-      aiStream = null;
-    }
+    stopStreaming();
     document.getElementById('challengeActiveUI').style.display='none';
     document.getElementById('battleResultUI').style.display='block';
     document.getElementById('finalScore').textContent = repCount;
     document.getElementById('trashTalk').textContent = trashTalks[Math.floor(Math.random()*trashTalks.length)];
-
     const championDiv = document.getElementById('championText');
     championDiv.style.display = 'block';
     speakChampion();
@@ -686,10 +651,7 @@ FRONTEND_HTML = """
         score: repCount
       })
     });
-
-    setTimeout(() => {
-      championDiv.style.display = 'none';
-    }, 5000);
+    setTimeout(() => { championDiv.style.display = 'none'; }, 5000);
   }
 
   function shareScore(){
@@ -736,10 +698,8 @@ FRONTEND_HTML = """
 def index():
     return FRONTEND_HTML
 
-# ---------- Create tables on startup ----------
-with app.app_context():
-    init_db()
-
+# ---------- Start server ----------
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    with app.app_context():
+        init_db()
+    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
