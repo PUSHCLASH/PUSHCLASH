@@ -109,7 +109,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (simple angle counter, no extra text) ----------
+# ---------- Frontend (final, robust AI counter) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -491,13 +491,14 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== SIMPLE ANGLE COUNTER (NO EXTRA CHECKS) ==========
+  // ========== ADVANCED, RELIABLE ANGLE COUNTER (no "NO POSE" overlay) ==========
   let angleBuffer = [];
   let lastRepTime = 0;
-  let isDown = false;          // true when arms are bent (angle < 90)
-  const ANGLE_DOWN_THRESHOLD = 90;
-  const ANGLE_UP_THRESHOLD = 160;
-  const MIN_REP_INTERVAL = 400;  // ms
+  let isDown = false;
+  const ANGLE_DOWN_THRESHOLD = 100;   // more forgiving than 90
+  const ANGLE_UP_THRESHOLD = 150;     // more forgiving than 160
+  const MIN_REP_INTERVAL = 400;       // ms
+  const MIN_CONFIDENCE = 0.5;         // lower threshold to accept keypoints
 
   async function startAICamera() {
     const video = document.getElementById('webcam');
@@ -545,6 +546,7 @@ FRONTEND_HTML = """
     const poses = await aiDetector.estimatePoses(video, { flipHorizontal: false });
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // We no longer show "NO POSE" – if no poses, just leave the previous angle or show nothing.
     if (poses.length > 0) {
       const keypoints = poses[0].keypoints;
       drawSkeleton(ctx, keypoints);
@@ -556,53 +558,54 @@ FRONTEND_HTML = """
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
+      // Check if all needed keypoints are present with reasonable confidence
+      if (leftShoulder && rightShoulder && leftElbow && leftWrist && rightElbow && rightWrist &&
+          leftShoulder.score > MIN_CONFIDENCE && rightShoulder.score > MIN_CONFIDENCE &&
+          leftElbow.score > MIN_CONFIDENCE && leftWrist.score > MIN_CONFIDENCE &&
+          rightElbow.score > MIN_CONFIDENCE && rightWrist.score > MIN_CONFIDENCE) {
+
         const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
         const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
         const rawAngle = (leftAngle + rightAngle) / 2;
 
-        // Very light smoothing (average of last 3)
         angleBuffer.push(rawAngle);
         if (angleBuffer.length > 3) angleBuffer.shift();
         const smoothedAngle = movingAverage(angleBuffer, 3);
-        if (smoothedAngle === null) {
-          requestAnimationFrame(detectPose);
-          return;
-        }
+        if (smoothedAngle !== null) {
+          // Show the angle
+          overlay.textContent = Math.round(smoothedAngle) + '°';
+          overlay.style.display = 'block';
 
-        // Show huge angle number
-        overlay.textContent = Math.round(smoothedAngle) + '°';
-        overlay.style.display = 'block';
+          const now = Date.now();
 
-        const now = Date.now();
+          // State machine
+          if (!isDown && smoothedAngle < ANGLE_DOWN_THRESHOLD) {
+            isDown = true;
+          } else if (isDown && smoothedAngle > ANGLE_UP_THRESHOLD) {
+            if (now - lastRepTime > MIN_REP_INTERVAL) {
+              repCount++;
+              document.getElementById('repCounter').textContent = repCount;
+              lastRepTime = now;
 
-        // State machine
-        if (!isDown && smoothedAngle < ANGLE_DOWN_THRESHOLD) {
-          isDown = true;
-        } else if (isDown && smoothedAngle > ANGLE_UP_THRESHOLD) {
-          if (now - lastRepTime > MIN_REP_INTERVAL) {
-            repCount++;
-            document.getElementById('repCounter').textContent = repCount;
-            lastRepTime = now;
-
-            // Flash effect
-            flash.style.display = 'block';
-            setTimeout(() => { flash.style.display = 'none'; }, 800);
+              // Rep flash effect
+              flash.style.display = 'block';
+              setTimeout(() => { flash.style.display = 'none'; }, 800);
+            }
+            isDown = false;
           }
-          isDown = false;
-        }
 
-        // Minimal debug: just angle (no state)
-        ctx.font = 'bold 18px Poppins';
-        ctx.fillStyle = '#00ffff';
-        ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
+          // Debug info (just angle, no state)
+          ctx.font = 'bold 18px Poppins';
+          ctx.fillStyle = '#00ffff';
+          ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
+        }
       } else {
-        overlay.textContent = '?';
-        overlay.style.display = 'block';
+        // Not all keypoints confident – keep previous angle if any
+        if (overlay.textContent === '' || overlay.textContent === '?') {
+          overlay.textContent = '?';
+          overlay.style.display = 'block';
+        }
       }
-    } else {
-      overlay.textContent = 'NO POSE';
-      overlay.style.display = 'block';
     }
 
     requestAnimationFrame(detectPose);
