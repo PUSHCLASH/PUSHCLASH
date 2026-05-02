@@ -201,7 +201,7 @@ self.addEventListener('activate', (event) => {
     )
     return response
 
-# ---------- Frontend (dragon CEO badge, everything else unchanged) ----------
+# ---------- Frontend (CSS dragons, everything else unchanged) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -378,7 +378,7 @@ FRONTEND_HTML = """
       pointer-events: none;
     }
 
-    /* ========== DRAGON CEO BADGE ========== */
+    /* ========== PURE CSS DRAGON BADGE ========== */
     .dragon-badge-wrap {
       position: fixed;
       top: 15px;
@@ -399,40 +399,45 @@ FRONTEND_HTML = """
     .dragon-orbit.reverse {
       animation: spin-reverse 4s linear infinite;
     }
-    .dragon-emoji {
+    /* CSS dragon shape */
+    .dragon-shape {
       position: absolute;
-      font-size: 1.8rem;
+      width: 20px;
+      height: 10px;
       top: 0;
       left: 50%;
       transform: translate(-50%, -50%);
-      filter: drop-shadow(0 0 6px currentColor);
+      border-radius: 50% 0 50% 0;
+      box-shadow: 0 0 10px currentColor;
     }
-    .ice-dragon {
+    .ice-dragon .dragon-shape {
+      background: #00bfff;
       color: #00bfff;
-      text-shadow: 0 0 12px #00bfff;
+      clip-path: polygon(0% 30%, 30% 0%, 100% 20%, 80% 100%, 20% 80%);
     }
-    .fire-dragon {
+    .fire-dragon .dragon-shape {
+      background: #ff4500;
       color: #ff4500;
-      text-shadow: 0 0 12px #ff4500;
+      clip-path: polygon(0% 30%, 30% 0%, 100% 20%, 80% 100%, 20% 80%);
     }
     @keyframes spin {
-      from { transform: translate(-50%, -50%) rotate(0deg) translateX(28px) rotate(0deg); }
-      to   { transform: translate(-50%, -50%) rotate(360deg) translateX(28px) rotate(-360deg); }
+      from { transform: translate(-50%, -50%) rotate(0deg) translateX(24px) rotate(0deg); }
+      to   { transform: translate(-50%, -50%) rotate(360deg) translateX(24px) rotate(-360deg); }
     }
     @keyframes spin-reverse {
-      from { transform: translate(-50%, -50%) rotate(0deg) translateX(28px) rotate(0deg); }
-      to   { transform: translate(-50%, -50%) rotate(-360deg) translateX(28px) rotate(360deg); }
+      from { transform: translate(-50%, -50%) rotate(0deg) translateX(24px) rotate(0deg); }
+      to   { transform: translate(-50%, -50%) rotate(-360deg) translateX(24px) rotate(360deg); }
     }
     .dragon-center {
       position: absolute;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      width: 10px;
-      height: 10px;
+      width: 12px;
+      height: 12px;
       background: white;
       border-radius: 50%;
-      box-shadow: 0 0 15px white;
+      box-shadow: 0 0 18px white, 0 0 30px #ff00ff;
     }
 
     .ceo-badge-tooltip {
@@ -545,13 +550,13 @@ FRONTEND_HTML = """
     <div class="splash-sub">AI Arena</div>
   </div>
 
-  <!-- Dragon CEO Badge (replaces static crown) -->
+  <!-- CSS Dragon CEO Badge (replaces emoji dragons) -->
   <div class="dragon-badge-wrap" onclick="document.getElementById('ceoModal').classList.add('active')" title="IKIGAI">
-    <div class="dragon-orbit">
-      <span class="dragon-emoji ice-dragon">🐉</span>
+    <div class="dragon-orbit ice-dragon">
+      <div class="dragon-shape"></div>
     </div>
-    <div class="dragon-orbit reverse">
-      <span class="dragon-emoji fire-dragon">🐉</span>
+    <div class="dragon-orbit reverse fire-dragon">
+      <div class="dragon-shape"></div>
     </div>
     <div class="dragon-center"></div>
   </div>
@@ -560,7 +565,7 @@ FRONTEND_HTML = """
   <!-- CEO Modal -->
   <div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
     <div class="ceo-modal" onclick="event.stopPropagation()">
-      <div style="font-size:2rem; margin-bottom:8px;">🐉🐉</div>
+      <div style="font-size:2rem; margin-bottom:8px;">🐉</div>
       <h2>KAUSHTUBH</h2>
       <div class="title">CEO OF PUSH CLASH</div>
       <div style="color:#ccc; font-size:0.9rem; margin:6px 0;">Have a query? Get in touch</div>
