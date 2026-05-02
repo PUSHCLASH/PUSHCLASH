@@ -162,7 +162,7 @@ self.addEventListener('fetch', (event) => {
     )
     return response
 
-# ---------- Frontend (angle counter + champion voice + weekly leaderboard + PWA + CEO badge) ----------
+# ---------- Frontend (angle counter + champion voice + weekly leaderboard + PWA + CEO badge + splash screen) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -427,9 +427,53 @@ FRONTEND_HTML = """
       margin-top: 18px;
       cursor: pointer;
     }
+
+    /* Splash Screen */
+    #splashScreen {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: radial-gradient(circle at 30% 50%, #1a1a2e, #0a0a0a);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 30000;
+      animation: fadeOut 0.8s ease 2.5s forwards;
+    }
+    @keyframes fadeOut {
+      to { opacity: 0; visibility: hidden; }
+    }
+    .splash-logo {
+      font-size: 5rem;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); text-shadow: 0 0 20px #ff00ff; }
+      50% { transform: scale(1.1); text-shadow: 0 0 40px #ff00ff, 0 0 60px #00ffff; }
+      100% { transform: scale(1); text-shadow: 0 0 20px #ff00ff; }
+    }
+    .splash-text {
+      font-size: 2rem;
+      font-weight: bold;
+      background: linear-gradient(135deg, #ff5500, #ff00ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-top: 20px;
+    }
+    .splash-sub {
+      color: #aaa;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
+  <!-- Splash Screen -->
+  <div id="splashScreen">
+    <div class="splash-logo">💪</div>
+    <div class="splash-text">PUSHCLASH</div>
+    <div class="splash-sub">AI Arena</div>
+  </div>
+
   <!-- CEO Badge (outside app container, fixed) -->
   <button class="ceo-badge-btn" onclick="document.getElementById('ceoModal').classList.add('active')" title="CEO of PushClash">👑</button>
   <div class="ceo-badge-tooltip">CEO of App</div>
@@ -519,6 +563,14 @@ FRONTEND_HTML = """
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
 
 <script>
+  // After page load, wait for the splash animation to finish before enabling interactions
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      const splash = document.getElementById('splashScreen');
+      if (splash) splash.style.display = 'none';
+    }, 3300); // slightly longer than CSS animation delay to ensure it's fully hidden
+  });
+
   let currentUser = null;
   let repCount = 0;
   let timeLeft = 60;
