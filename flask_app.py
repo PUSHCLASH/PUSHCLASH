@@ -162,7 +162,7 @@ self.addEventListener('fetch', (event) => {
     )
     return response
 
-# ---------- Frontend (angle counter + champion voice + weekly leaderboard + PWA) ----------
+# ---------- Frontend (angle counter + champion voice + weekly leaderboard + PWA + CEO badge) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -199,6 +199,7 @@ FRONTEND_HTML = """
       padding: 24px 20px;
       box-shadow: 0 0 40px rgba(255,0,255,0.3), 0 0 80px rgba(0,255,255,0.2);
       border: 1px solid rgba(0,255,255,0.2);
+      position: relative;
     }
     h1 {
       text-align: center;
@@ -262,7 +263,7 @@ FRONTEND_HTML = """
     .timer-big { font-size:5rem; text-align:center; font-weight:800; color:#00ffff; text-shadow:0 0 30px cyan; }
     .counter-big { font-size:4rem; text-align:center; font-weight:800; color:#ff00ff; }
     .tabs { display:flex; gap:8px; margin:16px 0; }
-    .tab { flex:1; text-align:center; padding:10px; background:#1e1e1e; border-radius:12px; cursor:pointer; font-weight:bold; }
+    .tab { flex:1; text-align:center; padding:10px; background:#1e1e1e; border-radius:12px; cursor:pointer; }
     .tab.active { background:#00ffff; color:black; }
     .leaderboard-item { display:flex; align-items:center; gap:12px; padding:10px; background:#1a1a1a; border-radius:12px; margin:6px 0; }
     .rank { font-size:1.5rem; font-weight:bold; width:40px; }
@@ -337,9 +338,115 @@ FRONTEND_HTML = """
       font-size: 14px;
       pointer-events: none;
     }
+
+    /* CEO Badge */
+    .ceo-badge-btn {
+      position: fixed;
+      top: 15px;
+      right: 15px;
+      z-index: 10000;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ff4500, #00bfff);
+      box-shadow: 0 0 18px #ff4500, 0 0 25px #00bfff;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      color: white;
+      animation: fireIcePulse 2s infinite;
+    }
+    @keyframes fireIcePulse {
+      0% { box-shadow: 0 0 12px #ff4500, 0 0 20px #00bfff; }
+      50% { box-shadow: 0 0 28px #ff8c00, 0 0 40px #00ffff; }
+      100% { box-shadow: 0 0 12px #ff4500, 0 0 20px #00bfff; }
+    }
+    .ceo-badge-tooltip {
+      position: fixed;
+      top: 68px;
+      right: 10px;
+      background: rgba(10,10,10,0.9);
+      color: #ccc;
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 12px;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 10001;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .ceo-modal-overlay {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(10px);
+      z-index: 20000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .ceo-modal-overlay.active { display: flex; }
+    .ceo-modal {
+      background: #1a1a1a;
+      border-radius: 24px;
+      padding: 30px 24px;
+      max-width: 320px;
+      width: 90%;
+      text-align: center;
+      border: 1px solid rgba(0,255,255,0.3);
+      box-shadow: 0 0 40px rgba(0,255,255,0.2), 0 0 60px rgba(255,0,0,0.2);
+    }
+    .ceo-modal h2 {
+      font-size: 1.6rem;
+      margin: 8px 0;
+      background: linear-gradient(135deg, #ff4500, #00bfff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .ceo-modal .title {
+      color: #ffaa00;
+      font-weight: bold;
+      margin-bottom: 10px;
+      font-size: 0.95rem;
+    }
+    .ceo-modal .phone {
+      color: #00ffff;
+      font-size: 1.3rem;
+      margin: 8px 0;
+      font-weight: bold;
+    }
+    .close-btn {
+      background: none;
+      border: 1px solid #555;
+      color: #aaa;
+      padding: 6px 20px;
+      border-radius: 20px;
+      margin-top: 18px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
+  <!-- CEO Badge (outside app container, fixed) -->
+  <button class="ceo-badge-btn" onclick="document.getElementById('ceoModal').classList.add('active')" title="CEO of PushClash">👑</button>
+  <div class="ceo-badge-tooltip">CEO of App</div>
+
+  <!-- CEO Modal -->
+  <div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
+    <div class="ceo-modal" onclick="event.stopPropagation()">
+      <div style="font-size:2rem; margin-bottom:8px;">👑</div>
+      <h2>KAUSHTUBH</h2>
+      <div class="title">CEO OF PUSH CLASH</div>
+      <div style="color:#ccc; font-size:0.9rem; margin:6px 0;">Have a query? Get in touch</div>
+      <div class="phone">📞 8950592855</div>
+      <div style="color:#aaa; font-size:0.7rem;">Tap to call (coming soon)</div>
+      <button class="close-btn" onclick="document.getElementById('ceoModal').classList.remove('active')">Close</button>
+    </div>
+  </div>
+
 <div class="app-container" id="app">
   <!-- Setup Screen -->
   <div id="setupScreen" class="screen active">
@@ -759,6 +866,12 @@ FRONTEND_HTML = """
   } else {
     showScreen('setupScreen');
   }
+
+  // Hide tooltip after a few seconds
+  setTimeout(() => {
+    const tooltip = document.querySelector('.ceo-badge-tooltip');
+    if (tooltip) tooltip.style.display = 'none';
+  }, 8000);
 </script>
 </body>
 </html>
