@@ -109,7 +109,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- PWA Routes (UPDATED) ----------
+# ---------- PWA Routes ----------
 @app.route('/manifest.json')
 def manifest():
     return jsonify({
@@ -201,7 +201,7 @@ self.addEventListener('activate', (event) => {
     )
     return response
 
-# ---------- Frontend (angle counter + champion voice + weekly leaderboard + PWA + CEO badge + splash screen) ----------
+# ---------- Frontend (with new arrow animation for CEO badge) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -403,6 +403,22 @@ FRONTEND_HTML = """
       50% { box-shadow: 0 0 28px #ff8c00, 0 0 40px #00ffff; }
       100% { box-shadow: 0 0 12px #ff4500, 0 0 20px #00bfff; }
     }
+    /* Arrow animation pointing to the CEO badge */
+    .ceo-arrow {
+      position: fixed;
+      top: 28px;
+      right: 75px;  /* to the left of the badge */
+      z-index: 10000;
+      font-size: 1.8rem;
+      color: #ffaa00;
+      filter: drop-shadow(0 0 6px #ffaa00);
+      animation: arrowBounce 0.8s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes arrowBounce {
+      0%, 100% { transform: translateX(0); }
+      50% { transform: translateX(8px); }
+    }
     .ceo-badge-tooltip {
       position: fixed;
       top: 68px;
@@ -513,7 +529,8 @@ FRONTEND_HTML = """
     <div class="splash-sub">AI Arena</div>
   </div>
 
-  <!-- CEO Badge (outside app container, fixed) -->
+  <!-- CEO Badge with arrow -->
+  <div class="ceo-arrow">👉</div>
   <button class="ceo-badge-btn" onclick="document.getElementById('ceoModal').classList.add('active')" title="CEO of PushClash">👑</button>
   <div class="ceo-badge-tooltip">CEO of App</div>
 
@@ -607,7 +624,7 @@ FRONTEND_HTML = """
     setTimeout(() => {
       const splash = document.getElementById('splashScreen');
       if (splash) splash.style.display = 'none';
-    }, 3300); // slightly longer than CSS animation delay to ensure it's fully hidden
+    }, 3300);
   });
 
   let currentUser = null;
