@@ -109,13 +109,74 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (debug version – shows camera status and skeleton) ----------
+# ---------- PWA Routes ----------
+@app.route('/manifest.json')
+def manifest():
+    return jsonify({
+        "name": "PushClash",
+        "short_name": "PushClash",
+        "description": "AI-powered competitive push-up arena",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0a0a0a",
+        "theme_color": "#ff00ff",
+        "orientation": "portrait-primary",
+        "icons": [
+            {
+                "src": "https://cdn-icons-png.flaticon.com/128/2548/2548538.png",
+                "sizes": "128x128",
+                "type": "image/png"
+            },
+            {
+                "src": "https://cdn-icons-png.flaticon.com/512/2548/2548538.png",
+                "sizes": "512x512",
+                "type": "image/png"
+            }
+        ]
+    })
+
+@app.route('/sw.js')
+def service_worker():
+    response = app.response_class(
+        response="""self.addEventListener('install', (event) => {
+    event.waitUntil(
+        caches.open('pushclash-v1').then((cache) => {
+            return cache.addAll([
+                '/',
+                '/manifest.json',
+                'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4',
+                'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2'
+            ]);
+        })
+    );
+});
+
+self.addEventListener('fetch', (event) => {
+    event.respondWith(
+        caches.match(event.request).then((response) => {
+            return response || fetch(event.request);
+        })
+    );
+});""",
+        mimetype='application/javascript'
+    )
+    return response
+
+# ---------- Frontend (angle counter + champion voice + weekly leaderboard + PWA) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  </script>
   <title>PUSHCLASH 🔥</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; font-family:'Poppins', sans-serif; }
@@ -265,7 +326,6 @@ FRONTEND_HTML = """
       50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
       100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
     }
-    /* New debug message */
     .debug-msg {
       position: absolute;
       bottom: 10px;
@@ -459,7 +519,6 @@ FRONTEND_HTML = """
     document.getElementById('repCounter').textContent='0';
     document.getElementById('aiCameraUI').style.display='block';
 
-    // Initialize debug message
     const debugMsg = document.getElementById('debugMsg');
     debugMsg.textContent = '📷 Camera starting...';
 
@@ -547,7 +606,6 @@ FRONTEND_HTML = """
       const keypoints = poses[0].keypoints;
       drawSkeleton(ctx, keypoints);
 
-      // Update debug message if skeleton is visible
       const leftShoulder = keypoints[5];
       const rightShoulder = keypoints[6];
       const leftElbow = keypoints[7];
