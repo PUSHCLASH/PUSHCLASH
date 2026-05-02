@@ -201,7 +201,7 @@ self.addEventListener('activate', (event) => {
     )
     return response
 
-# ---------- Frontend (with new arrow animation for CEO badge) ----------
+# ---------- Frontend (logo replaced, everything else unchanged) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -387,15 +387,11 @@ FRONTEND_HTML = """
       width: 48px;
       height: 48px;
       border-radius: 50%;
-      background: linear-gradient(135deg, #ff4500, #00bfff);
+      background: url('https://i.postimg.cc/q7CYyRTT/Screenshot-20260502-164646.jpg') center/cover;
       box-shadow: 0 0 18px #ff4500, 0 0 25px #00bfff;
       border: none;
       cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.6rem;
-      color: white;
+      color: transparent;
       animation: fireIcePulse 2s infinite;
     }
     @keyframes fireIcePulse {
@@ -403,11 +399,10 @@ FRONTEND_HTML = """
       50% { box-shadow: 0 0 28px #ff8c00, 0 0 40px #00ffff; }
       100% { box-shadow: 0 0 12px #ff4500, 0 0 20px #00bfff; }
     }
-    /* Arrow animation pointing to the CEO badge */
     .ceo-arrow {
       position: fixed;
       top: 28px;
-      right: 75px;  /* to the left of the badge */
+      right: 75px;
       z-index: 10000;
       font-size: 1.8rem;
       color: #ffaa00;
@@ -529,9 +524,9 @@ FRONTEND_HTML = """
     <div class="splash-sub">AI Arena</div>
   </div>
 
-  <!-- CEO Badge with arrow -->
+  <!-- CEO Badge with arrow + new logo -->
   <div class="ceo-arrow">👉</div>
-  <button class="ceo-badge-btn" onclick="document.getElementById('ceoModal').classList.add('active')" title="CEO of PushClash">👑</button>
+  <button class="ceo-badge-btn" onclick="document.getElementById('ceoModal').classList.add('active')" title="IKIGAI"></button>
   <div class="ceo-badge-tooltip">CEO of App</div>
 
   <!-- CEO Modal -->
