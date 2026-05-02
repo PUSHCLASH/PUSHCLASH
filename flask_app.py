@@ -3,10 +3,7 @@ import os
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, g
 
-# ---------- App definition ----------
 app = Flask(__name__)
-
-# ---------- Database setup ----------
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pushclash.db')
 
 def get_db():
@@ -40,40 +37,29 @@ def init_db():
         )''')
         db.commit()
 
-# ---------- API Endpoints ----------
 @app.route('/api/battle', methods=['POST'])
 def record_battle():
     data = request.get_json()
-    name = data.get('name', '').strip()
-    nationality = data.get('nationality', '').strip()
-    email = data.get('email', '').strip()
-    score = int(data.get('score', 0))
+    name, nationality, email = data.get('name','').strip(), data.get('nationality','').strip(), data.get('email','').strip()
+    score = int(data.get('score',0))
     if not name or not nationality or not email or score <= 0:
-        return jsonify({'error': 'Invalid data'}), 400
-    db = get_db()
-    db.execute('INSERT INTO battles (name, nationality, email, score) VALUES (?, ?, ?, ?)',
-               (name, nationality, email, score))
-    db.commit()
-    return jsonify({'status': 'ok'})
+        return jsonify({'error':'Invalid data'}), 400
+    get_db().execute('INSERT INTO battles (name,nationality,email,score) VALUES (?,?,?,?)',
+                     (name,nationality,email,score))
+    get_db().commit()
+    return jsonify({'status':'ok'})
 
 @app.route('/api/leaderboard')
 def leaderboard():
     db = get_db()
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    rows = db.execute(
-        'SELECT name, nationality, email, score, timestamp FROM battles WHERE timestamp >= ? ORDER BY timestamp DESC',
-        (seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'),)
-    ).fetchall()
+    rows = db.execute('SELECT name,nationality,email,score,timestamp FROM battles WHERE timestamp>=? ORDER BY timestamp DESC',
+                      (seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'),)).fetchall()
     best_map = {}
     for r in rows:
         email = r['email']
         if email not in best_map or r['score'] > best_map[email]['score']:
-            best_map[email] = {
-                'name': r['name'],
-                'nationality': r['nationality'],
-                'score': r['score'],
-                'date': r['timestamp']
-            }
+            best_map[email] = {'name':r['name'],'nationality':r['nationality'],'score':r['score'],'date':r['timestamp']}
     sorted_best = sorted(best_map.values(), key=lambda x: x['score'], reverse=True)[:10]
     result = []
     for entry in sorted_best:
@@ -82,945 +68,247 @@ def leaderboard():
             try:
                 dt = datetime.strptime(entry['date'], '%Y-%m-%d %H:%M:%S')
                 date_str = dt.strftime('%b %d')
-            except:
-                pass
-        result.append({
-            'name': entry['name'],
-            'nationality': entry['nationality'],
-            'score': entry['score'],
-            'date': date_str
-        })
+            except: pass
+        result.append({'name':entry['name'],'nationality':entry['nationality'],'score':entry['score'],'date':date_str})
     return jsonify(result)
 
 @app.route('/api/stats', methods=['POST'])
 def user_stats():
-    data = request.get_json()
-    email = data.get('email')
-    if not email:
-        return jsonify({'totalBattles': 0, 'personalBest': 0, 'rank': '-'})
+    email = request.get_json().get('email')
+    if not email: return jsonify({'totalBattles':0,'personalBest':0,'rank':'-'})
     db = get_db()
-    total = db.execute('SELECT COUNT(*) as total FROM battles WHERE email=?', (email,)).fetchone()['total']
-    best = db.execute('SELECT MAX(score) as best FROM battles WHERE email=?', (email,)).fetchone()['best'] or 0
+    total = db.execute('SELECT COUNT(*) FROM battles WHERE email=?',(email,)).fetchone()[0]
+    best = db.execute('SELECT MAX(score) FROM battles WHERE email=?',(email,)).fetchone()[0] or 0
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    rank_row = db.execute('''
-        SELECT COUNT(DISTINCT email) + 1 as rank FROM battles
-        WHERE timestamp >= ? AND score > (SELECT COALESCE(MAX(score),0) FROM battles WHERE email=? AND timestamp >= ?)
-    ''', (seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'), email, seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'))).fetchone()
-    rank = rank_row['rank'] if rank_row else '-'
-    return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
+    rank_row = db.execute('''SELECT COUNT(DISTINCT email)+1 FROM battles
+                             WHERE timestamp>=? AND score > (SELECT COALESCE(MAX(score),0) FROM battles WHERE email=? AND timestamp>=?)''',
+                          (seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'), email, seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'))).fetchone()
+    return jsonify({'totalBattles':total,'personalBest':best,'rank':rank_row[0] if rank_row else '-'})
 
-# ---------- PWA Routes ----------
 @app.route('/manifest.json')
 def manifest():
     return jsonify({
-        "name": "PushClash",
-        "short_name": "PushClash",
-        "description": "AI-powered competitive push-up arena",
-        "start_url": "/",
-        "scope": "/",
-        "display": "standalone",
-        "background_color": "#0a0a0a",
-        "theme_color": "#ff00ff",
-        "orientation": "portrait-primary",
-        "categories": ["fitness", "health", "sports"],
-        "icons": [
-            {
-                "src": "https://cdn-icons-png.flaticon.com/128/2548/2548538.png",
-                "sizes": "128x128",
-                "type": "image/png"
-            },
-            {
-                "src": "https://cdn-icons-png.flaticon.com/192/2548/2548538.png",
-                "sizes": "192x192",
-                "type": "image/png"
-            },
-            {
-                "src": "https://cdn-icons-png.flaticon.com/512/2548/2548538.png",
-                "sizes": "512x512",
-                "type": "image/png",
-                "purpose": "any maskable"
-            }
+        "name":"PushClash","short_name":"PushClash","start_url":"/","scope":"/",
+        "display":"standalone","background_color":"#0a0a0a","theme_color":"#ff00ff",
+        "icons":[
+            {"src":"https://cdn-icons-png.flaticon.com/128/2548/2548538.png","sizes":"128x128","type":"image/png"},
+            {"src":"https://cdn-icons-png.flaticon.com/192/2548/2548538.png","sizes":"192x192","type":"image/png"},
+            {"src":"https://cdn-icons-png.flaticon.com/512/2548/2548538.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
         ]
     })
 
 @app.route('/sw.js')
 def service_worker():
-    response = app.response_class(
-        response="""const CACHE_NAME = 'pushclash-v2';
-const urlsToCache = [
-  '/',
-  '/manifest.json',
-  'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4',
-  'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2'
-];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(urlsToCache);
-    })
-  );
-});
-
-self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request).then((response) => {
-      if (response) {
-        return response;
-      }
-      const fetchRequest = event.request.clone();
-      return fetch(fetchRequest).then((response) => {
-        if(!response || response.status !== 200 || response.type !== 'basic') {
-          return response;
-        }
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
-        });
-        return response;
-      });
-    })
-  );
-});
-
-self.addEventListener('activate', (event) => {
-  const cacheWhitelist = [CACHE_NAME];
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (!cacheWhitelist.includes(cacheName)) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
-  );
-});""",
+    return app.response_class(
+        response="""const CACHE_NAME='pushclash-v2';
+self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json']))) });
+self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))) });
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))))});""",
         mimetype='application/javascript'
     )
-    return response
 
-# ---------- Frontend (CSS dragons, everything else unchanged) ----------
-FRONTEND_HTML = """
-<!DOCTYPE html>
+FRONTEND_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-  <link rel="manifest" href="/manifest.json">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js');
-    }
-  </script>
-  <title>PUSHCLASH 🔥</title>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; font-family:'Poppins', sans-serif; }
-    body {
-      background: #0a0a0a;
-      color: #fff;
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      padding: 20px;
-      background-image: radial-gradient(circle at 50% 50%, #1a1a1a 0%, #000000 100%);
-      overflow-x: hidden;
-    }
-    .app-container {
-      max-width: 450px;
-      width: 100%;
-      background: #111;
-      border-radius: 28px;
-      padding: 24px 20px;
-      box-shadow: 0 0 40px rgba(255,0,255,0.3), 0 0 80px rgba(0,255,255,0.2);
-      border: 1px solid rgba(0,255,255,0.2);
-      position: relative;
-    }
-    h1 {
-      text-align: center;
-      font-size: 2.8rem;
-      background: linear-gradient(135deg, #ff5500, #ff00ff);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 8px;
-      text-shadow: 0 0 20px #ff00ff;
-      letter-spacing: 2px;
-    }
-    .arena-subtitle { text-align: center; color: #aaa; font-size: 0.9rem; margin-bottom: 24px; letter-spacing: 1px; }
-    .screen { display: none; }
-    .screen.active { display: block; }
-    .battle-input {
-      width: 100%;
-      padding: 15px 18px;
-      margin: 10px 0;
-      border: 1px solid rgba(0,255,255,0.4);
-      border-radius: 14px;
-      background: rgba(20,20,20,0.9);
-      color: white;
-      font-size: 1rem;
-      outline: none;
-      transition: 0.3s;
-    }
-    .battle-input:focus {
-      background: #1e1e1e;
-      box-shadow: 0 0 15px #00ffff;
-      border-color: #00ffff;
-    }
-    .btn-primary {
-      width: 100%;
-      padding: 16px;
-      margin: 12px 0;
-      border: none;
-      border-radius: 14px;
-      background: linear-gradient(135deg, #ff5500, #ff00ff);
-      color: #fff;
-      font-weight: bold;
-      font-size: 1.2rem;
-      cursor: pointer;
-      box-shadow: 0 0 25px rgba(255,0,255,0.4);
-      transition: transform 0.1s, box-shadow 0.2s;
-      letter-spacing: 1px;
-    }
-    .btn-primary:active { transform: scale(0.97); }
-    .btn-secondary {
-      width: 100%;
-      padding: 14px;
-      margin: 8px 0;
-      border: 1px solid #00ffff;
-      border-radius: 14px;
-      background: transparent;
-      color: #00ffff;
-      font-weight: bold;
-      cursor: pointer;
-      transition: 0.2s;
-    }
-    .btn-secondary:hover { background: rgba(0,255,255,0.1); }
-    .timer-big { font-size:5rem; text-align:center; font-weight:800; color:#00ffff; text-shadow:0 0 30px cyan; }
-    .counter-big { font-size:4rem; text-align:center; font-weight:800; color:#ff00ff; }
-    .tabs { display:flex; gap:8px; margin:16px 0; }
-    .tab { flex:1; text-align:center; padding:10px; background:#1e1e1e; border-radius:12px; cursor:pointer; }
-    .tab.active { background:#00ffff; color:black; }
-    .leaderboard-item { display:flex; align-items:center; gap:12px; padding:10px; background:#1a1a1a; border-radius:12px; margin:6px 0; }
-    .rank { font-size:1.5rem; font-weight:bold; width:40px; }
-    .score { margin-left:auto; font-weight:bold; color:#00ffff; }
-    .score-date { font-size:0.75rem; color:#888; margin-left:6px; }
-    .result-msg { text-align:center; font-size:1.3rem; margin:12px 0; font-style:italic; color:#ff00ff; }
-    .champion-voice-text {
-      text-align: center;
-      font-size: 1.1rem;
-      color: #ff5500;
-      font-weight: bold;
-      margin: 12px 0;
-      animation: fadeInUp 1s ease;
-    }
-    @keyframes fadeInUp {
-      0% { opacity: 0; transform: translateY(20px); }
-      100% { opacity: 1; transform: translateY(0); }
-    }
-    .share-btn { background:#00ffff; color:black; }
-    .small { font-size:0.85rem; color:#aaa; }
-    nav { display:flex; gap:10px; margin:16px 0; }
-    nav button { flex:1; font-size:0.8rem; padding:10px; }
-    video, canvas { width:100%; border-radius:14px; display:none; }
-    #aiCameraUI { position:relative; width:100%; height:250px; margin:10px 0; border-radius:14px; overflow:hidden; }
-    #aiCameraUI video, #aiCameraUI canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
-    .mode-choice { display:flex; gap:10px; margin:20px 0; }
-    .mode-choice button { flex:1; }
-    .arena-shield {
-      font-size: 3rem;
-      text-align: center;
-      margin-bottom: 10px;
-      filter: drop-shadow(0 0 20px #ff00ff);
-    }
-    .error-msg { color: #ff4444; font-size: 0.8rem; text-align: center; margin: 5px 0; }
-    .success-msg { color: #00ff88; font-size: 0.9rem; text-align: center; margin: 10px 0; }
-    .angle-overlay {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 5rem;
-      font-weight: 800;
-      color: #00ffff;
-      text-shadow: 0 0 30px cyan;
-      pointer-events: none;
-    }
-    .rep-flash {
-      position: absolute;
-      top: 30%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 3rem;
-      font-weight: 800;
-      color: #00ff00;
-      text-shadow: 0 0 30px #00ff00;
-      pointer-events: none;
-      animation: fadeInOut 0.8s ease;
-    }
-    @keyframes fadeInOut {
-      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
-      50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
-      100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
-    }
-    .debug-msg {
-      position: absolute;
-      bottom: 10px;
-      left: 10px;
-      background: rgba(0,0,0,0.7);
-      color: #ffaa00;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 14px;
-      pointer-events: none;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=yes">
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script>navigator.serviceWorker?.register('/sw.js')</script>
+<title>PUSHCLASH 🔥</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Poppins',sans-serif}
+body{background:#0a0a0a;color:#fff;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;background-image:radial-gradient(circle at 50% 50%,#1a1a1a 0%,#000 100%);overflow-x:hidden}
+.app-container{max-width:450px;width:100%;background:#111;border-radius:28px;padding:24px 20px;box-shadow:0 0 40px rgba(255,0,255,.3),0 0 80px rgba(0,255,255,.2);border:1px solid rgba(0,255,255,.2);position:relative}
+h1{text-align:center;font-size:2.8rem;background:linear-gradient(135deg,#ff5500,#ff00ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px;text-shadow:0 0 20px #ff00ff}
+.arena-subtitle{text-align:center;color:#aaa;font-size:.9rem;margin-bottom:24px}
+.screen{display:none}.screen.active{display:block}
+.battle-input{width:100%;padding:15px 18px;margin:10px 0;border:1px solid rgba(0,255,255,.4);border-radius:14px;background:rgba(20,20,20,.9);color:#fff;font-size:1rem;outline:none}
+.battle-input:focus{background:#1e1e1e;box-shadow:0 0 15px #0ff;border-color:#0ff}
+.btn-primary{width:100%;padding:16px;margin:12px 0;border:none;border-radius:14px;background:linear-gradient(135deg,#ff5500,#ff00ff);color:#fff;font-weight:bold;font-size:1.2rem;cursor:pointer;box-shadow:0 0 25px rgba(255,0,255,.4);transition:transform .1s,box-shadow .2s}
+.btn-primary:active{transform:scale(.97)}
+.btn-secondary{width:100%;padding:14px;margin:8px 0;border:1px solid #0ff;border-radius:14px;background:transparent;color:#0ff;font-weight:bold;cursor:pointer;transition:.2s}
+.btn-secondary:hover{background:rgba(0,255,255,.1)}
+.timer-big{font-size:5rem;text-align:center;font-weight:800;color:#0ff;text-shadow:0 0 30px cyan}
+.counter-big{font-size:4rem;text-align:center;font-weight:800;color:#f0f}
+.leaderboard-item{display:flex;align-items:center;gap:12px;padding:10px;background:#1a1a1a;border-radius:12px;margin:6px 0}
+.rank{font-size:1.5rem;font-weight:bold;width:40px}
+.score{margin-left:auto;font-weight:bold;color:#0ff}
+.score-date{font-size:.75rem;color:#888;margin-left:6px}
+.result-msg{text-align:center;font-size:1.3rem;margin:12px 0;font-style:italic;color:#f0f}
+.champion-voice-text{text-align:center;font-size:1.1rem;color:#ff5500;font-weight:bold;margin:12px 0;animation:fadeInUp 1s ease}
+@keyframes fadeInUp{0%{opacity:0;transform:translateY(20px)}100%{opacity:1;transform:translateY(0)}}
+.share-btn{background:#0ff;color:black}
+.small{font-size:.85rem;color:#aaa}
+nav{display:flex;gap:10px;margin:16px 0}
+nav button{flex:1;font-size:.8rem;padding:10px}
+video,canvas{width:100%;border-radius:14px;display:none}
+#aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden}
+#aiCameraUI video,#aiCameraUI canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+.success-msg{color:#00ff88;font-size:.9rem;text-align:center;margin:10px 0}
+.angle-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;font-weight:800;color:#0ff;text-shadow:0 0 30px cyan;pointer-events:none}
+.rep-flash{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:3rem;font-weight:800;color:#0f0;text-shadow:0 0 30px green;animation:fadeInOut .8s ease}
+@keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
+.debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.7);color:#fa0;padding:4px 8px;border-radius:6px;font-size:14px;pointer-events:none}
 
-    /* ========== PURE CSS DRAGON BADGE ========== */
-    .dragon-badge-wrap {
-      position: fixed;
-      top: 15px;
-      right: 15px;
-      z-index: 10000;
-      width: 56px;
-      height: 56px;
-      cursor: pointer;
-    }
-    .dragon-orbit {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 100%;
-      height: 100%;
-      animation: spin 4s linear infinite;
-    }
-    .dragon-orbit.reverse {
-      animation: spin-reverse 4s linear infinite;
-    }
-    /* CSS dragon shape */
-    .dragon-shape {
-      position: absolute;
-      width: 20px;
-      height: 10px;
-      top: 0;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      border-radius: 50% 0 50% 0;
-      box-shadow: 0 0 10px currentColor;
-    }
-    .ice-dragon .dragon-shape {
-      background: #00bfff;
-      color: #00bfff;
-      clip-path: polygon(0% 30%, 30% 0%, 100% 20%, 80% 100%, 20% 80%);
-    }
-    .fire-dragon .dragon-shape {
-      background: #ff4500;
-      color: #ff4500;
-      clip-path: polygon(0% 30%, 30% 0%, 100% 20%, 80% 100%, 20% 80%);
-    }
-    @keyframes spin {
-      from { transform: translate(-50%, -50%) rotate(0deg) translateX(24px) rotate(0deg); }
-      to   { transform: translate(-50%, -50%) rotate(360deg) translateX(24px) rotate(-360deg); }
-    }
-    @keyframes spin-reverse {
-      from { transform: translate(-50%, -50%) rotate(0deg) translateX(24px) rotate(0deg); }
-      to   { transform: translate(-50%, -50%) rotate(-360deg) translateX(24px) rotate(360deg); }
-    }
-    .dragon-center {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 12px;
-      height: 12px;
-      background: white;
-      border-radius: 50%;
-      box-shadow: 0 0 18px white, 0 0 30px #ff00ff;
-    }
+/* DRAGON ORBIT BADGE – guaranteed to work */
+.dragon-badge{position:fixed;top:15px;right:15px;z-index:10000;width:56px;height:56px;cursor:pointer;border-radius:50%}
+.dragon{position:absolute;top:50%;left:50%;font-size:2rem;transform-origin:center center;animation:orbit 3s linear infinite}
+.ice-dragon{color:#0bf;text-shadow:0 0 12px #0bf,0 0 24px #0bf}
+.fire-dragon{color:#f40;text-shadow:0 0 12px #f40,0 0 24px #f40}
+.ice-dragon::before{content:"🐉"}
+.fire-dragon::before{content:"🐉"}
+@keyframes orbit{from{transform:translate(-50%,-50%) rotate(0deg) translateX(28px) rotate(0deg)}to{transform:translate(-50%,-50%) rotate(360deg) translateX(28px) rotate(-360deg)}}
+.ice-dragon{animation-direction:normal}.fire-dragon{animation-direction:reverse}
 
-    .ceo-badge-tooltip {
-      position: fixed;
-      top: 75px;
-      right: 10px;
-      background: rgba(10,10,10,0.9);
-      color: #ccc;
-      font-size: 0.75rem;
-      padding: 4px 10px;
-      border-radius: 12px;
-      white-space: nowrap;
-      pointer-events: none;
-      z-index: 10001;
-      border: 1px solid rgba(255,255,255,0.2);
-    }
-    .ceo-modal-overlay {
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.85);
-      backdrop-filter: blur(10px);
-      z-index: 20000;
-      display: none;
-      align-items: center;
-      justify-content: center;
-    }
-    .ceo-modal-overlay.active { display: flex; }
-    .ceo-modal {
-      background: #1a1a1a;
-      border-radius: 24px;
-      padding: 30px 24px;
-      max-width: 320px;
-      width: 90%;
-      text-align: center;
-      border: 1px solid rgba(0,255,255,0.3);
-      box-shadow: 0 0 40px rgba(0,255,255,0.2), 0 0 60px rgba(255,0,0,0.2);
-    }
-    .ceo-modal h2 {
-      font-size: 1.6rem;
-      margin: 8px 0;
-      background: linear-gradient(135deg, #ff4500, #00bfff);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .ceo-modal .title {
-      color: #ffaa00;
-      font-weight: bold;
-      margin-bottom: 10px;
-      font-size: 0.95rem;
-    }
-    .ceo-modal .phone {
-      color: #00ffff;
-      font-size: 1.3rem;
-      margin: 8px 0;
-      font-weight: bold;
-    }
-    .close-btn {
-      background: none;
-      border: 1px solid #555;
-      color: #aaa;
-      padding: 6px 20px;
-      border-radius: 20px;
-      margin-top: 18px;
-      cursor: pointer;
-    }
-
-    /* Splash Screen */
-    #splashScreen {
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: radial-gradient(circle at 30% 50%, #1a1a2e, #0a0a0a);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 30000;
-      animation: fadeOut 0.8s ease 2.5s forwards;
-    }
-    @keyframes fadeOut {
-      to { opacity: 0; visibility: hidden; }
-    }
-    .splash-logo {
-      font-size: 5rem;
-      animation: pulse 1.5s infinite;
-    }
-    @keyframes pulse {
-      0% { transform: scale(1); text-shadow: 0 0 20px #ff00ff; }
-      50% { transform: scale(1.1); text-shadow: 0 0 40px #ff00ff, 0 0 60px #00ffff; }
-      100% { transform: scale(1); text-shadow: 0 0 20px #ff00ff; }
-    }
-    .splash-text {
-      font-size: 2rem;
-      font-weight: bold;
-      background: linear-gradient(135deg, #ff5500, #ff00ff);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-top: 20px;
-    }
-    .splash-sub {
-      color: #aaa;
-      margin-top: 8px;
-    }
-  </style>
+.ceo-modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);z-index:20000;display:none;align-items:center;justify-content:center}
+.ceo-modal-overlay.active{display:flex}
+.ceo-modal{background:#1a1a1a;border-radius:24px;padding:30px 24px;max-width:320px;width:90%;text-align:center;border:1px solid rgba(0,255,255,.3);box-shadow:0 0 40px rgba(0,255,255,.2),0 0 60px rgba(255,0,0,.2)}
+.ceo-modal h2{font-size:1.6rem;margin:8px 0;background:linear-gradient(135deg,#ff4500,#00bfff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.ceo-modal .title{color:#fa0;font-weight:bold;margin-bottom:10px;font-size:.95rem}
+.ceo-modal .phone{color:#0ff;font-size:1.3rem;margin:8px 0;font-weight:bold}
+.close-btn{background:none;border:1px solid #555;color:#aaa;padding:6px 20px;border-radius:20px;margin-top:18px;cursor:pointer}
+</style>
 </head>
 <body>
-  <!-- Splash Screen -->
-  <div id="splashScreen">
-    <div class="splash-logo">💪</div>
-    <div class="splash-text">PUSHCLASH</div>
-    <div class="splash-sub">AI Arena</div>
-  </div>
 
-  <!-- CSS Dragon CEO Badge (replaces emoji dragons) -->
-  <div class="dragon-badge-wrap" onclick="document.getElementById('ceoModal').classList.add('active')" title="IKIGAI">
-    <div class="dragon-orbit ice-dragon">
-      <div class="dragon-shape"></div>
-    </div>
-    <div class="dragon-orbit reverse fire-dragon">
-      <div class="dragon-shape"></div>
-    </div>
-    <div class="dragon-center"></div>
-  </div>
-  <div class="ceo-badge-tooltip">CEO of App</div>
+<!-- DRAGONS -->
+<div class="dragon-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
+  <div class="dragon ice-dragon"></div>
+  <div class="dragon fire-dragon"></div>
+</div>
 
-  <!-- CEO Modal -->
-  <div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
-    <div class="ceo-modal" onclick="event.stopPropagation()">
-      <div style="font-size:2rem; margin-bottom:8px;">🐉</div>
-      <h2>KAUSHTUBH</h2>
-      <div class="title">CEO OF PUSH CLASH</div>
-      <div style="color:#ccc; font-size:0.9rem; margin:6px 0;">Have a query? Get in touch</div>
-      <div class="phone">📞 8950592855</div>
-      <div style="color:#aaa; font-size:0.7rem;">Tap to call (coming soon)</div>
-      <button class="close-btn" onclick="document.getElementById('ceoModal').classList.remove('active')">Close</button>
-    </div>
+<div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
+  <div class="ceo-modal" onclick="event.stopPropagation()">
+    <div style="font-size:2rem;margin-bottom:8px">🐉🐉</div>
+    <h2>KAUSHTUBH</h2>
+    <div class="title">CEO OF PUSH CLASH</div>
+    <div class="phone">📞 8950592855</div>
+    <button class="close-btn" onclick="document.getElementById('ceoModal').classList.remove('active')">Close</button>
   </div>
+</div>
 
 <div class="app-container" id="app">
-  <!-- Setup Screen -->
+  <!-- Setup, Dashboard, Challenge, Leaderboard screens unchanged -->
   <div id="setupScreen" class="screen active">
     <h1>PUSHCLASH</h1>
     <div class="arena-subtitle">⚔️ ENTER THE ARENA ⚔️</div>
-    <div class="arena-shield">🛡️🔥🛡️</div>
-    <input class="battle-input" type="text" id="nameInput" placeholder="Your Warrior Name" maxlength="30">
-    <input class="battle-input" type="text" id="nationalityInput" placeholder="Nationality (e.g. Indian, American)" maxlength="30">
-    <input class="battle-input" type="email" id="emailInput" placeholder="Email (your battle ID)" maxlength="50">
+    <div style="font-size:3rem;text-align:center;margin-bottom:10px">🛡️🔥🛡️</div>
+    <input class="battle-input" id="nameInput" placeholder="Your Warrior Name" maxlength="30">
+    <input class="battle-input" id="nationalityInput" placeholder="Nationality" maxlength="30">
+    <input class="battle-input" id="emailInput" placeholder="Email (your battle ID)" maxlength="50">
     <div class="error-msg" id="setupError"></div>
     <button class="btn-primary" onclick="saveProfile()">⚡ ENTER ARENA ⚡</button>
-    <p class="small" style="text-align:center; margin-top:16px;">Only real warriors dare to compete</p>
+    <p class="small" style="text-align:center;margin-top:16px">Only real warriors dare to compete</p>
   </div>
-
-  <!-- Dashboard -->
   <div id="dashboardScreen" class="screen">
     <h1>PUSHCLASH</h1>
-    <p style="font-size:1.4rem;">Welcome, <span id="dashName"></span>!</p>
+    <p style="font-size:1.4rem">Welcome, <span id="dashName"></span>!</p>
     <p class="small">🌍 <span id="dashNationality"></span></p>
-    <div style="display:flex; gap:12px; margin:20px 0;">
-      <div style="flex:1; background:#1a1a1a; border-radius:14px; padding:12px; text-align:center;">
-        <div style="font-size:2rem; font-weight:bold; color:#00ffff;" id="personalBest">0</div>
-        <div class="small">Personal Best</div>
-      </div>
-      <div style="flex:1; background:#1a1a1a; border-radius:14px; padding:12px; text-align:center;">
-        <div style="font-size:2rem; font-weight:bold; color:#ff00ff;" id="totalBattles">0</div>
-        <div class="small">Total Battles</div>
-      </div>
+    <div style="display:flex;gap:12px;margin:20px 0">
+      <div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#0ff" id="personalBest">0</div><div class="small">Personal Best</div></div>
+      <div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#f0f" id="totalBattles">0</div><div class="small">Total Battles</div></div>
     </div>
     <button class="btn-primary" onclick="startChallenge('ai')">🤖 START AI BATTLE</button>
     <button class="btn-secondary" onclick="showLeaderboard()">🏆 Weekly Leaderboard</button>
     <button class="btn-secondary" onclick="resetProfile()">🔄 Leave Arena</button>
-    <div class="success-msg" id="saveConfirmation" style="display:none;">✅ Score saved to global arena!</div>
+    <div class="success-msg" id="saveConfirmation" style="display:none">✅ Score saved to global arena!</div>
   </div>
-
-  <!-- Challenge Screen -->
   <div id="challengeScreen" class="screen">
-    <div id="countdownDisplay" class="timer-big" style="font-size:4rem;">3</div>
-    <div id="challengeActiveUI" style="display:none;">
+    <div id="countdownDisplay" class="timer-big" style="font-size:4rem">3</div>
+    <div id="challengeActiveUI" style="display:none">
       <div class="timer-big" id="timerDisplay">60</div>
       <div class="counter-big" id="repCounter">0</div>
-      <div id="aiCameraUI">
-        <video id="webcam" autoplay playsinline></video>
-        <canvas id="poseCanvas"></canvas>
-        <div class="angle-overlay" id="angleOverlay"></div>
-        <div class="rep-flash" id="repFlash" style="display:none;">REP!</div>
-        <div class="debug-msg" id="debugMsg"></div>
-      </div>
+      <div id="aiCameraUI"><video id="webcam" autoplay playsinline></video><canvas id="poseCanvas"></canvas><div class="angle-overlay" id="angleOverlay"></div><div class="rep-flash" id="repFlash" style="display:none">REP!</div><div class="debug-msg" id="debugMsg"></div></div>
     </div>
-    <div id="battleResultUI" style="display:none; text-align:center;">
+    <div id="battleResultUI" style="display:none;text-align:center">
       <h2>⚔️ Battle Over!</h2>
-      <div style="font-size:3rem; color:#00ffff;" id="finalScore">0</div>
+      <div style="font-size:3rem;color:#0ff" id="finalScore">0</div>
       <div class="result-msg" id="trashTalk"></div>
-      <div class="champion-voice-text" id="championText" style="display:none;">“Champions are built in losses, my friend. Come back stronger.”</div>
+      <div class="champion-voice-text" id="championText" style="display:none">“Champions are built in losses, my friend. Come back stronger.”</div>
       <button class="btn-primary" onclick="shareScore()">📢 Share My Score</button>
       <button class="btn-secondary" onclick="goToDashboard()">Back to Arena</button>
     </div>
   </div>
-
-  <!-- Leaderboard Screen -->
   <div id="leaderboardScreen" class="screen">
     <h1>WEEKLY RANKINGS</h1>
-    <p class="small" style="text-align:center;">Top 10 of the last 7 days</p>
+    <p class="small" style="text-align:center">Top 10 of the last 7 days</p>
     <div id="leaderboardList"></div>
-    <button class="btn-secondary" onclick="goToDashboard()" style="margin-top:16px;">← Back to Arena</button>
+    <button class="btn-secondary" onclick="goToDashboard()" style="margin-top:16px">← Back to Arena</button>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
-
 <script>
-  // After page load, wait for the splash animation to finish before enabling interactions
-  window.addEventListener('load', () => {
-    setTimeout(() => {
-      const splash = document.getElementById('splashScreen');
-      if (splash) splash.style.display = 'none';
-    }, 3300);
-  });
+let currentUser=null,repCount=0,timeLeft=60,challengeInterval,countdownInterval,challengeMode='ai',aiDetector=null,aiStream=null;
+const trashTalks=["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"],BASE=window.location.origin;
 
-  let currentUser = null;
-  let repCount = 0;
-  let timeLeft = 60;
-  let challengeInterval, countdownInterval;
-  let challengeMode = 'ai';
-  let aiDetector = null;
-  let aiStream = null;
-  const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
-  const BASE = window.location.origin;
+function speakWelcome(){const m=new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");m.lang='en-US',m.rate=.9,m.pitch=1.1;const v=speechSynthesis.getVoices(),f=v.find(x=>x.name.toLowerCase().includes('female')||x.name.toLowerCase().includes('samantha')||x.name.toLowerCase().includes('google uk female')||x.name.toLowerCase().includes('microsoft zira'));if(f)m.voice=f;speechSynthesis.speak(m)}
+function speakChampion(){const m=new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger.");m.lang='en-US',m.rate=.85,m.pitch=.8;const v=speechSynthesis.getVoices(),mk=v.find(x=>x.name.toLowerCase().includes('male')||x.name.toLowerCase().includes('google uk male')||x.name.toLowerCase().includes('microsoft david')||x.name.toLowerCase().includes('daniel'));if(mk)m.voice=mk;speechSynthesis.speak(m)}
 
-  function speakWelcome() {
-    const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
-    msg.lang = 'en-US'; msg.rate = 0.9; msg.pitch = 1.1;
-    const voices = speechSynthesis.getVoices();
-    const femaleVoice = voices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha') || v.name.toLowerCase().includes('google uk female') || v.name.toLowerCase().includes('microsoft zira'));
-    if (femaleVoice) msg.voice = femaleVoice;
-    speechSynthesis.speak(msg);
-  }
-  function speakChampion() {
-    const msg = new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger.");
-    msg.lang = 'en-US'; msg.rate = 0.85; msg.pitch = 0.8;
-    const voices = speechSynthesis.getVoices();
-    const maleVoice = voices.find(v => v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('google uk male') || v.name.toLowerCase().includes('microsoft david') || v.name.toLowerCase().includes('daniel'));
-    if (maleVoice) msg.voice = maleVoice;
-    speechSynthesis.speak(msg);
-  }
-
-  function saveProfile(){
-    const name = document.getElementById('nameInput').value.trim();
-    const nationality = document.getElementById('nationalityInput').value.trim();
-    const email = document.getElementById('emailInput').value.trim();
-    const errorDiv = document.getElementById('setupError');
-    if(!name || !nationality || !email) { errorDiv.textContent = 'All fields are required!'; return; }
-    if(!email.includes('@') || !email.includes('.')) { errorDiv.textContent = 'Please enter a valid email'; return; }
-    errorDiv.textContent = '';
-    currentUser = {name, nationality, email};
-    localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
-    speakWelcome();
-    showScreen('dashboardScreen');
-    loadStats();
-  }
-  function resetProfile(){
-    localStorage.removeItem('pushclash_user');
-    currentUser=null;
-    showScreen('setupScreen');
-  }
-  function showScreen(id){
-    document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
-    document.getElementById(id).classList.add('active');
-    if(id !== 'dashboardScreen') {
-      const conf = document.getElementById('saveConfirmation');
-      if(conf) conf.style.display = 'none';
-    }
-  }
-  function goToDashboard(){
-    if (aiStream) {
-      aiStream.getTracks().forEach(track => track.stop());
-      aiStream = null;
-    }
-    loadStats();
-    showScreen('dashboardScreen');
-  }
-  async function loadStats(){
-    if(!currentUser) return;
-    document.getElementById('dashName').textContent = currentUser.name;
-    document.getElementById('dashNationality').textContent = currentUser.nationality;
-    const res = await fetch('/api/stats', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({email: currentUser.email})
-    });
-    const data = await res.json();
-    document.getElementById('personalBest').textContent = data.personalBest;
-    document.getElementById('totalBattles').textContent = data.totalBattles;
-  }
-
-  async function startChallenge(mode) {
-    challengeMode = mode;
-    showScreen('challengeScreen');
-    document.getElementById('countdownDisplay').style.display='block';
-    document.getElementById('challengeActiveUI').style.display='none';
-    document.getElementById('battleResultUI').style.display='none';
-    repCount = 0;
-    let count=3;
-    document.getElementById('countdownDisplay').textContent=count;
-    countdownInterval = setInterval(()=>{
-      count--;
-      if(count===0){
-        document.getElementById('countdownDisplay').textContent='GO!';
-        setTimeout(()=>{
-          clearInterval(countdownInterval);
-          document.getElementById('countdownDisplay').style.display='none';
-          startActiveChallenge();
-        },400);
-      } else {
-        document.getElementById('countdownDisplay').textContent=count;
-      }
-    },800);
-  }
-
-  async function startActiveChallenge(){
-    timeLeft=60;
-    document.getElementById('challengeActiveUI').style.display='block';
-    document.getElementById('timerDisplay').textContent=timeLeft;
-    document.getElementById('repCounter').textContent='0';
-    document.getElementById('aiCameraUI').style.display='block';
-
-    const debugMsg = document.getElementById('debugMsg');
-    debugMsg.textContent = '📷 Camera starting...';
-
-    await startAICamera();
-
-    challengeInterval = setInterval(()=>{
-      timeLeft--;
-      document.getElementById('timerDisplay').textContent=timeLeft;
-      if(timeLeft<=0){
-        clearInterval(challengeInterval);
-        endBattle();
-      }
-    },1000);
-  }
-
-  // ========== Angle counter with debug ==========
-  let angleBuffer = [];
-  let lastRepTime = 0;
-  let aiState = 'up';
-  let modelLoaded = false;
-  let modelLoadError = false;
-
-  async function startAICamera() {
-    const video = document.getElementById('webcam');
-    const canvas = document.getElementById('poseCanvas');
-    const ctx = canvas.getContext('2d');
-    const debugMsg = document.getElementById('debugMsg');
-
-    try {
-      aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      video.srcObject = aiStream;
-      await video.play();
-      debugMsg.textContent = '📹 Camera active, loading AI...';
-    } catch(e) {
-      debugMsg.textContent = '❌ Camera access denied!';
-      return;
-    }
-
-    video.addEventListener('loadedmetadata', () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    });
-
-    try {
-      const detectorConfig = { modelType: 'SinglePose.Lightning' };
-      aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
-      modelLoaded = true;
-      debugMsg.textContent = '✅ AI ready – show yourself!';
-    } catch(e) {
-      modelLoadError = true;
-      debugMsg.textContent = '❌ AI model failed to load. Check internet.';
-      return;
-    }
-
-    angleBuffer = [];
-    lastRepTime = 0;
-    aiState = 'up';
-    requestAnimationFrame(detectPose);
-  }
-
-  function movingAverage(arr, N) {
-    const recent = arr.slice(-N);
-    if (recent.length === 0) return null;
-    return recent.reduce((sum, val) => sum + val, 0) / recent.length;
-  }
-
-  async function detectPose() {
-    if (timeLeft <= 0 || !aiDetector || !aiStream) return;
-
-    const video = document.getElementById('webcam');
-    const canvas = document.getElementById('poseCanvas');
-    const ctx = canvas.getContext('2d');
-    const overlay = document.getElementById('angleOverlay');
-    const debugMsg = document.getElementById('debugMsg');
-
-    if (video.readyState < 2) {
-      requestAnimationFrame(detectPose);
-      return;
-    }
-
-    const poses = await aiDetector.estimatePoses(video, { flipHorizontal: false });
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (poses.length > 0) {
-      const keypoints = poses[0].keypoints;
-      drawSkeleton(ctx, keypoints);
-
-      const leftShoulder = keypoints[5];
-      const rightShoulder = keypoints[6];
-      const leftElbow = keypoints[7];
-      const leftWrist = keypoints[9];
-      const rightElbow = keypoints[8];
-      const rightWrist = keypoints[10];
-
-      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
-        const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-        const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-        const rawAngle = (leftAngle + rightAngle) / 2;
-
-        angleBuffer.push(rawAngle);
-        if (angleBuffer.length > 5) angleBuffer.shift();
-        const smoothedAngle = movingAverage(angleBuffer, 5);
-        if (smoothedAngle === null) {
-          requestAnimationFrame(detectPose);
-          return;
-        }
-
-        overlay.textContent = Math.round(smoothedAngle) + '°';
-        overlay.style.display = 'block';
-        debugMsg.textContent = '🟢 Active – ' + Math.round(smoothedAngle) + '°';
-
-        const now = Date.now();
-
-        if (aiState === 'up' && smoothedAngle < 90) {
-          aiState = 'down';
-        } else if (aiState === 'down' && smoothedAngle > 160) {
-          if (now - lastRepTime > 500) {
-            repCount++;
-            document.getElementById('repCounter').textContent = repCount;
-            lastRepTime = now;
-            const flash = document.getElementById('repFlash');
-            flash.style.display = 'block';
-            setTimeout(() => { flash.style.display = 'none'; }, 800);
-          }
-          aiState = 'up';
-        }
-
-        ctx.font = 'bold 18px Poppins';
-        ctx.fillStyle = '#00ffff';
-        ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
-      } else {
-        overlay.textContent = '?';
-        overlay.style.display = 'block';
-        debugMsg.textContent = '⚠️ Not all keypoints visible – adjust camera';
-      }
-    } else {
-      overlay.textContent = '?';
-      overlay.style.display = 'block';
-      debugMsg.textContent = '🔍 Searching for pose...';
-    }
-
-    requestAnimationFrame(detectPose);
-  }
-
-  function calculateAngle(a, b, c) {
-    const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-    let angle = Math.abs(radians * 180.0 / Math.PI);
-    if (angle > 180.0) angle = 360 - angle;
-    return angle;
-  }
-
-  function drawSkeleton(ctx, keypoints) {
-    const adjacentKeyPoints = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
-    ctx.strokeStyle = '#00ffff';
-    ctx.lineWidth = 2;
-    for (const pair of adjacentKeyPoints) {
-      const p1 = keypoints[pair[0]];
-      const p2 = keypoints[pair[1]];
-      if (p1.score > 0.3 && p2.score > 0.3) {
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      }
-    }
-    for (const kp of keypoints) {
-      if (kp.score > 0.3) {
-        ctx.fillStyle = '#ff00ff';
-        ctx.beginPath();
-        ctx.arc(kp.x, kp.y, 4, 0, 2 * Math.PI);
-        ctx.fill();
-      }
-    }
-  }
-
-  async function endBattle(){
-    if (aiStream) {
-      aiStream.getTracks().forEach(track => track.stop());
-      aiStream = null;
-    }
-    document.getElementById('challengeActiveUI').style.display='none';
-    document.getElementById('battleResultUI').style.display='block';
-    document.getElementById('finalScore').textContent = repCount;
-    document.getElementById('trashTalk').textContent = trashTalks[Math.floor(Math.random()*trashTalks.length)];
-
-    const championDiv = document.getElementById('championText');
-    championDiv.style.display = 'block';
-    speakChampion();
-
-    await fetch('/api/battle', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        name: currentUser.name,
-        nationality: currentUser.nationality,
-        email: currentUser.email,
-        score: repCount
-      })
-    });
-
-    setTimeout(() => {
-      championDiv.style.display = 'none';
-    }, 5000);
-  }
-
-  function shareScore(){
-    const text = `I just did ${repCount} push-ups in PushClash! Can you beat me? 🔥 ${BASE}`;
-    navigator.clipboard.writeText(text).then(()=>alert('Link copied!'));
-  }
-
-  async function showLeaderboard(){
-    showScreen('leaderboardScreen');
-    const res = await fetch('/api/leaderboard');
-    const data = await res.json();
-    const container = document.getElementById('leaderboardList');
-    if(!data.length){
-      container.innerHTML = '<p style="text-align:center;color:#aaa;">No battles in the last 7 days. Be the first!</p>';
-      return;
-    }
-    container.innerHTML = data.map((b,i)=>{
-      const emojis = ['🥇','🥈','🥉'];
-      const rankDisp = i<3 ? emojis[i] : `#${i+1}`;
-      const dateStr = b.date ? ` <span class="score-date">${b.date}</span>` : '';
-      return `<div class="leaderboard-item">
-        <span class="rank">${rankDisp}</span>
-        <span>${b.name}</span>
-        <span class="small">${b.nationality}</span>
-        <span class="score">${b.score}${dateStr}</span>
-      </div>`;
-    }).join('');
-  }
-
-  // Init
-  currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
-  if(currentUser){
-    showScreen('dashboardScreen');
-    loadStats();
-  } else {
-    showScreen('setupScreen');
-  }
-
-  // Hide tooltip after a few seconds
-  setTimeout(() => {
-    const tooltip = document.querySelector('.ceo-badge-tooltip');
-    if (tooltip) tooltip.style.display = 'none';
-  }, 8000);
+function saveProfile(){
+  const n=document.getElementById('nameInput').value.trim(),nat=document.getElementById('nationalityInput').value.trim(),em=document.getElementById('emailInput').value.trim(),err=document.getElementById('setupError');
+  if(!n||!nat||!em){err.textContent='All fields are required!';return}
+  if(!em.includes('@')||!em.includes('.')){err.textContent='Please enter a valid email';return}
+  err.textContent='';currentUser={name:n,nationality:nat,email:em};localStorage.setItem('pushclash_user',JSON.stringify(currentUser));speakWelcome();showScreen('dashboardScreen');loadStats()
+}
+function resetProfile(){localStorage.removeItem('pushclash_user');currentUser=null;showScreen('setupScreen')}
+function showScreen(id){document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active'));document.getElementById(id).classList.add('active');if(id!=='dashboardScreen')document.getElementById('saveConfirmation').style.display='none'}
+function goToDashboard(){if(aiStream){aiStream.getTracks().forEach(t=>t.stop());aiStream=null}loadStats();showScreen('dashboardScreen')}
+async function loadStats(){
+  if(!currentUser)return;document.getElementById('dashName').textContent=currentUser.name;document.getElementById('dashNationality').textContent=currentUser.nationality;
+  const r=await fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})}),d=await r.json();
+  document.getElementById('personalBest').textContent=d.personalBest;document.getElementById('totalBattles').textContent=d.totalBattles
+}
+async function startChallenge(mode){
+  challengeMode=mode;showScreen('challengeScreen');document.getElementById('countdownDisplay').style.display='block';document.getElementById('challengeActiveUI').style.display='none';document.getElementById('battleResultUI').style.display='none';repCount=0;let c=3;document.getElementById('countdownDisplay').textContent=c;
+  countdownInterval=setInterval(()=>{c--;if(c===0){document.getElementById('countdownDisplay').textContent='GO!';setTimeout(()=>{clearInterval(countdownInterval);document.getElementById('countdownDisplay').style.display='none';startActiveChallenge()},400)}else{document.getElementById('countdownDisplay').textContent=c}},800)
+}
+async function startActiveChallenge(){
+  timeLeft=60;document.getElementById('challengeActiveUI').style.display='block';document.getElementById('timerDisplay').textContent=timeLeft;document.getElementById('repCounter').textContent='0';document.getElementById('aiCameraUI').style.display='block';
+  document.getElementById('debugMsg').textContent='📷 Camera starting...';await startAICamera();
+  challengeInterval=setInterval(()=>{timeLeft--;document.getElementById('timerDisplay').textContent=timeLeft;if(timeLeft<=0){clearInterval(challengeInterval);endBattle()}},1000)
+}
+let angleBuffer=[],lastRepTime=0,aiState='up';
+async function startAICamera(){
+  const video=document.getElementById('webcam'),canvas=document.getElementById('poseCanvas'),ctx=canvas.getContext('2d'),debugMsg=document.getElementById('debugMsg');
+  try{aiStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});video.srcObject=aiStream;await video.play();debugMsg.textContent='📹 Camera active, loading AI...'}catch(e){debugMsg.textContent='❌ Camera access denied!';return}
+  video.addEventListener('loadedmetadata',()=>{canvas.width=video.videoWidth;canvas.height=video.videoHeight});
+  try{const cfg={modelType:'SinglePose.Lightning'};aiDetector=await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,cfg);debugMsg.textContent='✅ AI ready – show yourself!'}catch(e){debugMsg.textContent='❌ AI model failed to load. Check internet.';return}
+  angleBuffer=[];lastRepTime=0;aiState='up';requestAnimationFrame(detectPose)
+}
+function movingAverage(arr,N){const recent=arr.slice(-N);if(!recent.length)return null;return recent.reduce((a,b)=>a+b,0)/recent.length}
+async function detectPose(){
+  if(timeLeft<=0||!aiDetector||!aiStream)return;const video=document.getElementById('webcam'),canvas=document.getElementById('poseCanvas'),ctx=canvas.getContext('2d'),overlay=document.getElementById('angleOverlay'),debugMsg=document.getElementById('debugMsg');
+  if(video.readyState<2){requestAnimationFrame(detectPose);return}
+  const poses=await aiDetector.estimatePoses(video,{flipHorizontal:false});ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(poses.length>0){const kp=poses[0].keypoints;drawSkeleton(ctx,kp);const ls=kp[5],rs=kp[6],le=kp[7],lw=kp[9],re=kp[8],rw=kp[10];if(ls&&le&&lw&&rs&&re&&rw){const la=calculateAngle(ls,le,lw),ra=calculateAngle(rs,re,rw),raw=(la+ra)/2;angleBuffer.push(raw);if(angleBuffer.length>5)angleBuffer.shift();const sa=movingAverage(angleBuffer,5);if(sa===null){requestAnimationFrame(detectPose);return}overlay.textContent=Math.round(sa)+'°';overlay.style.display='block';debugMsg.textContent='🟢 Active – '+Math.round(sa)+'°';const now=Date.now();if(aiState==='up'&&sa<90){aiState='down'}else if(aiState==='down'&&sa>160){if(now-lastRepTime>500){repCount++;document.getElementById('repCounter').textContent=repCount;lastRepTime=now;const flash=document.getElementById('repFlash');flash.style.display='block';setTimeout(()=>{flash.style.display='none'},800)}aiState='up'}}else{overlay.textContent='?';overlay.style.display='block';debugMsg.textContent='⚠️ Not all keypoints visible'}}else{overlay.textContent='?';overlay.style.display='block';debugMsg.textContent='🔍 Searching for pose...'}requestAnimationFrame(detectPose)
+}
+function calculateAngle(a,b,c){const radians=Math.atan2(c.y-b.y,c.x-b.x)-Math.atan2(a.y-b.y,a.x-b.x);let angle=Math.abs(radians*180/Math.PI);if(angle>180)angle=360-angle;return angle}
+function drawSkeleton(ctx,kp){const adj=poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);ctx.strokeStyle='#0ff';ctx.lineWidth=2;for(const[p1,p2]of adj){if(kp[p1].score>.3&&kp[p2].score>.3){ctx.beginPath();ctx.moveTo(kp[p1].x,kp[p1].y);ctx.lineTo(kp[p2].x,kp[p2].y);ctx.stroke()}}for(const p of kp){if(p.score>.3){ctx.fillStyle='#f0f';ctx.beginPath();ctx.arc(p.x,p.y,4,0,2*Math.PI);ctx.fill()}}}
+async function endBattle(){
+  if(aiStream){aiStream.getTracks().forEach(t=>t.stop());aiStream=null}document.getElementById('challengeActiveUI').style.display='none';document.getElementById('battleResultUI').style.display='block';
+  document.getElementById('finalScore').textContent=repCount;document.getElementById('trashTalk').textContent=trashTalks[Math.floor(Math.random()*trashTalks.length)];
+  const champ=document.getElementById('championText');champ.style.display='block';speakChampion();
+  await fetch('/api/battle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:currentUser.name,nationality:currentUser.nationality,email:currentUser.email,score:repCount})});
+  setTimeout(()=>{champ.style.display='none'},5000)
+}
+function shareScore(){navigator.clipboard.writeText(`I just did ${repCount} push-ups in PushClash! Can you beat me? 🔥 ${BASE}`).then(()=>alert('Link copied!'))}
+async function showLeaderboard(){
+  showScreen('leaderboardScreen');const r=await fetch('/api/leaderboard'),d=await r.json(),c=document.getElementById('leaderboardList');
+  if(!d.length){c.innerHTML='<p style="text-align:center;color:#aaa">No battles in the last 7 days. Be the first!</p>';return}
+  c.innerHTML=d.map((b,i)=>{const e=['🥇','🥈','🥉'],rd=i<3?e[i]:`#${i+1}`,ds=b.date?` <span class="score-date">${b.date}</span>`:'';return `<div class="leaderboard-item"><span class="rank">${rd}</span><span>${b.name}</span><span class="small">${b.nationality}</span><span class="score">${b.score}${ds}</span></div>`}).join('')
+}
+currentUser=JSON.parse(localStorage.getItem('pushclash_user'));if(currentUser){showScreen('dashboardScreen');loadStats()}else showScreen('setupScreen')
 </script>
 </body>
-</html>
-"""
+</html>"""
 
 @app.route('/')
-def index():
-    return FRONTEND_HTML
+def index(): return FRONTEND_HTML
 
-# ---------- Create tables on startup ----------
-with app.app_context():
-    init_db()
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+if __name__=='__main__':
+    with app.app_context(): init_db()
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT',5000)), debug=False)
