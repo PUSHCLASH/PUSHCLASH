@@ -40,7 +40,7 @@ def init_db():
         )''')
         db.commit()
 
-# ---------- API Endpoints (unchanged) ----------
+# ---------- API Endpoints ----------
 @app.route('/api/battle', methods=['POST'])
 def record_battle():
     data = request.get_json()
@@ -109,7 +109,7 @@ def user_stats():
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
-# ---------- Frontend (final, robust AI counter) ----------
+# ---------- Frontend (debug version – shows camera status and skeleton) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -149,16 +149,9 @@ FRONTEND_HTML = """
       text-shadow: 0 0 20px #ff00ff;
       letter-spacing: 2px;
     }
-    .arena-subtitle {
-      text-align: center;
-      color: #aaa;
-      font-size: 0.9rem;
-      margin-bottom: 24px;
-      letter-spacing: 1px;
-    }
+    .arena-subtitle { text-align: center; color: #aaa; font-size: 0.9rem; margin-bottom: 24px; letter-spacing: 1px; }
     .screen { display: none; }
     .screen.active { display: block; }
-
     .battle-input {
       width: 100%;
       padding: 15px 18px;
@@ -205,7 +198,6 @@ FRONTEND_HTML = """
       transition: 0.2s;
     }
     .btn-secondary:hover { background: rgba(0,255,255,0.1); }
-
     .timer-big { font-size:5rem; text-align:center; font-weight:800; color:#00ffff; text-shadow:0 0 30px cyan; }
     .counter-big { font-size:4rem; text-align:center; font-weight:800; color:#ff00ff; }
     .tabs { display:flex; gap:8px; margin:16px 0; }
@@ -237,25 +229,14 @@ FRONTEND_HTML = """
     #aiCameraUI video, #aiCameraUI canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
     .mode-choice { display:flex; gap:10px; margin:20px 0; }
     .mode-choice button { flex:1; }
-
     .arena-shield {
       font-size: 3rem;
       text-align: center;
       margin-bottom: 10px;
       filter: drop-shadow(0 0 20px #ff00ff);
     }
-    .error-msg {
-      color: #ff4444;
-      font-size: 0.8rem;
-      text-align: center;
-      margin: 5px 0;
-    }
-    .success-msg {
-      color: #00ff88;
-      font-size: 0.9rem;
-      text-align: center;
-      margin: 10px 0;
-    }
+    .error-msg { color: #ff4444; font-size: 0.8rem; text-align: center; margin: 5px 0; }
+    .success-msg { color: #00ff88; font-size: 0.9rem; text-align: center; margin: 10px 0; }
     .angle-overlay {
       position: absolute;
       top: 50%;
@@ -283,6 +264,18 @@ FRONTEND_HTML = """
       0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
       50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
       100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+    }
+    /* New debug message */
+    .debug-msg {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      color: #ffaa00;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 14px;
+      pointer-events: none;
     }
   </style>
 </head>
@@ -333,6 +326,7 @@ FRONTEND_HTML = """
         <canvas id="poseCanvas"></canvas>
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none;">REP!</div>
+        <div class="debug-msg" id="debugMsg"></div>
       </div>
     </div>
     <div id="battleResultUI" style="display:none; text-align:center;">
@@ -370,20 +364,15 @@ FRONTEND_HTML = """
 
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
-    msg.lang = 'en-US';
-    msg.rate = 0.9;
-    msg.pitch = 1.1;
+    msg.lang = 'en-US'; msg.rate = 0.9; msg.pitch = 1.1;
     const voices = speechSynthesis.getVoices();
     const femaleVoice = voices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha') || v.name.toLowerCase().includes('google uk female') || v.name.toLowerCase().includes('microsoft zira'));
     if (femaleVoice) msg.voice = femaleVoice;
     speechSynthesis.speak(msg);
   }
-
   function speakChampion() {
     const msg = new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger.");
-    msg.lang = 'en-US';
-    msg.rate = 0.85;
-    msg.pitch = 0.8;
+    msg.lang = 'en-US'; msg.rate = 0.85; msg.pitch = 0.8;
     const voices = speechSynthesis.getVoices();
     const maleVoice = voices.find(v => v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('google uk male') || v.name.toLowerCase().includes('microsoft david') || v.name.toLowerCase().includes('daniel'));
     if (maleVoice) msg.voice = maleVoice;
@@ -395,14 +384,8 @@ FRONTEND_HTML = """
     const nationality = document.getElementById('nationalityInput').value.trim();
     const email = document.getElementById('emailInput').value.trim();
     const errorDiv = document.getElementById('setupError');
-    if(!name || !nationality || !email) {
-      errorDiv.textContent = 'All fields are required!';
-      return;
-    }
-    if(!email.includes('@') || !email.includes('.')) {
-      errorDiv.textContent = 'Please enter a valid email';
-      return;
-    }
+    if(!name || !nationality || !email) { errorDiv.textContent = 'All fields are required!'; return; }
+    if(!email.includes('@') || !email.includes('.')) { errorDiv.textContent = 'Please enter a valid email'; return; }
     errorDiv.textContent = '';
     currentUser = {name, nationality, email};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
@@ -410,13 +393,11 @@ FRONTEND_HTML = """
     showScreen('dashboardScreen');
     loadStats();
   }
-
   function resetProfile(){
     localStorage.removeItem('pushclash_user');
     currentUser=null;
     showScreen('setupScreen');
   }
-
   function showScreen(id){
     document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
     document.getElementById(id).classList.add('active');
@@ -425,7 +406,6 @@ FRONTEND_HTML = """
       if(conf) conf.style.display = 'none';
     }
   }
-
   function goToDashboard(){
     if (aiStream) {
       aiStream.getTracks().forEach(track => track.stop());
@@ -434,7 +414,6 @@ FRONTEND_HTML = """
     loadStats();
     showScreen('dashboardScreen');
   }
-
   async function loadStats(){
     if(!currentUser) return;
     document.getElementById('dashName').textContent = currentUser.name;
@@ -479,6 +458,11 @@ FRONTEND_HTML = """
     document.getElementById('timerDisplay').textContent=timeLeft;
     document.getElementById('repCounter').textContent='0';
     document.getElementById('aiCameraUI').style.display='block';
+
+    // Initialize debug message
+    const debugMsg = document.getElementById('debugMsg');
+    debugMsg.textContent = '📷 Camera starting...';
+
     await startAICamera();
 
     challengeInterval = setInterval(()=>{
@@ -491,35 +475,48 @@ FRONTEND_HTML = """
     },1000);
   }
 
-  // ========== ADVANCED, RELIABLE ANGLE COUNTER (no "NO POSE" overlay) ==========
+  // ========== Angle counter with debug ==========
   let angleBuffer = [];
   let lastRepTime = 0;
-  let isDown = false;
-  const ANGLE_DOWN_THRESHOLD = 100;   // more forgiving than 90
-  const ANGLE_UP_THRESHOLD = 150;     // more forgiving than 160
-  const MIN_REP_INTERVAL = 400;       // ms
-  const MIN_CONFIDENCE = 0.5;         // lower threshold to accept keypoints
+  let aiState = 'up';
+  let modelLoaded = false;
+  let modelLoadError = false;
 
   async function startAICamera() {
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('poseCanvas');
     const ctx = canvas.getContext('2d');
+    const debugMsg = document.getElementById('debugMsg');
 
-    aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-    video.srcObject = aiStream;
-    await video.play();
+    try {
+      aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      video.srcObject = aiStream;
+      await video.play();
+      debugMsg.textContent = '📹 Camera active, loading AI...';
+    } catch(e) {
+      debugMsg.textContent = '❌ Camera access denied!';
+      return;
+    }
 
     video.addEventListener('loadedmetadata', () => {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
     });
 
-    const detectorConfig = { modelType: 'SinglePose.Lightning' };
-    aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
+    try {
+      const detectorConfig = { modelType: 'SinglePose.Lightning' };
+      aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
+      modelLoaded = true;
+      debugMsg.textContent = '✅ AI ready – show yourself!';
+    } catch(e) {
+      modelLoadError = true;
+      debugMsg.textContent = '❌ AI model failed to load. Check internet.';
+      return;
+    }
 
     angleBuffer = [];
     lastRepTime = 0;
-    isDown = false;
+    aiState = 'up';
     requestAnimationFrame(detectPose);
   }
 
@@ -536,7 +533,7 @@ FRONTEND_HTML = """
     const canvas = document.getElementById('poseCanvas');
     const ctx = canvas.getContext('2d');
     const overlay = document.getElementById('angleOverlay');
-    const flash = document.getElementById('repFlash');
+    const debugMsg = document.getElementById('debugMsg');
 
     if (video.readyState < 2) {
       requestAnimationFrame(detectPose);
@@ -546,11 +543,11 @@ FRONTEND_HTML = """
     const poses = await aiDetector.estimatePoses(video, { flipHorizontal: false });
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // We no longer show "NO POSE" – if no poses, just leave the previous angle or show nothing.
     if (poses.length > 0) {
       const keypoints = poses[0].keypoints;
       drawSkeleton(ctx, keypoints);
 
+      // Update debug message if skeleton is visible
       const leftShoulder = keypoints[5];
       const rightShoulder = keypoints[6];
       const leftElbow = keypoints[7];
@@ -558,54 +555,51 @@ FRONTEND_HTML = """
       const rightElbow = keypoints[8];
       const rightWrist = keypoints[10];
 
-      // Check if all needed keypoints are present with reasonable confidence
-      if (leftShoulder && rightShoulder && leftElbow && leftWrist && rightElbow && rightWrist &&
-          leftShoulder.score > MIN_CONFIDENCE && rightShoulder.score > MIN_CONFIDENCE &&
-          leftElbow.score > MIN_CONFIDENCE && leftWrist.score > MIN_CONFIDENCE &&
-          rightElbow.score > MIN_CONFIDENCE && rightWrist.score > MIN_CONFIDENCE) {
-
+      if (leftShoulder && leftElbow && leftWrist && rightShoulder && rightElbow && rightWrist) {
         const leftAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
         const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
         const rawAngle = (leftAngle + rightAngle) / 2;
 
         angleBuffer.push(rawAngle);
-        if (angleBuffer.length > 3) angleBuffer.shift();
-        const smoothedAngle = movingAverage(angleBuffer, 3);
-        if (smoothedAngle !== null) {
-          // Show the angle
-          overlay.textContent = Math.round(smoothedAngle) + '°';
-          overlay.style.display = 'block';
+        if (angleBuffer.length > 5) angleBuffer.shift();
+        const smoothedAngle = movingAverage(angleBuffer, 5);
+        if (smoothedAngle === null) {
+          requestAnimationFrame(detectPose);
+          return;
+        }
 
-          const now = Date.now();
+        overlay.textContent = Math.round(smoothedAngle) + '°';
+        overlay.style.display = 'block';
+        debugMsg.textContent = '🟢 Active – ' + Math.round(smoothedAngle) + '°';
 
-          // State machine
-          if (!isDown && smoothedAngle < ANGLE_DOWN_THRESHOLD) {
-            isDown = true;
-          } else if (isDown && smoothedAngle > ANGLE_UP_THRESHOLD) {
-            if (now - lastRepTime > MIN_REP_INTERVAL) {
-              repCount++;
-              document.getElementById('repCounter').textContent = repCount;
-              lastRepTime = now;
+        const now = Date.now();
 
-              // Rep flash effect
-              flash.style.display = 'block';
-              setTimeout(() => { flash.style.display = 'none'; }, 800);
-            }
-            isDown = false;
+        if (aiState === 'up' && smoothedAngle < 90) {
+          aiState = 'down';
+        } else if (aiState === 'down' && smoothedAngle > 160) {
+          if (now - lastRepTime > 500) {
+            repCount++;
+            document.getElementById('repCounter').textContent = repCount;
+            lastRepTime = now;
+            const flash = document.getElementById('repFlash');
+            flash.style.display = 'block';
+            setTimeout(() => { flash.style.display = 'none'; }, 800);
           }
+          aiState = 'up';
+        }
 
-          // Debug info (just angle, no state)
-          ctx.font = 'bold 18px Poppins';
-          ctx.fillStyle = '#00ffff';
-          ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
-        }
+        ctx.font = 'bold 18px Poppins';
+        ctx.fillStyle = '#00ffff';
+        ctx.fillText(`Angle: ${Math.round(smoothedAngle)}°`, 20, 40);
       } else {
-        // Not all keypoints confident – keep previous angle if any
-        if (overlay.textContent === '' || overlay.textContent === '?') {
-          overlay.textContent = '?';
-          overlay.style.display = 'block';
-        }
+        overlay.textContent = '?';
+        overlay.style.display = 'block';
+        debugMsg.textContent = '⚠️ Not all keypoints visible – adjust camera';
       }
+    } else {
+      overlay.textContent = '?';
+      overlay.style.display = 'block';
+      debugMsg.textContent = '🔍 Searching for pose...';
     }
 
     requestAnimationFrame(detectPose);
