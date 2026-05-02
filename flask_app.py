@@ -132,7 +132,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Luffy Gear 5 + smash + all screens) ----------
+# ---------- Frontend (Luffy Gear 5 badge, no round background, no smash) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -171,18 +171,12 @@ FRONTEND_HTML = """
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.7);color:#fa0;padding:4px 8px;border-radius:6px;font-size:14px;pointer-events:none}
 
-  /* CEO Badge */
-  .ceo-badge{position:fixed;top:15px;right:15px;z-index:10000;display:flex;flex-direction:column;align-items:center;cursor:pointer}
-  .ceo-img{width:50px;height:50px;border-radius:50%;object-fit:cover;border:2px solid #ff4500;box-shadow:0 0 15px #ff4500,0 0 25px #00bfff}
+  /* Luffy Gear 5 Badge */
+  .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
+  .luffy-svg{width:55px;height:55px;filter:drop-shadow(0 0 8px rgba(255,255,255,0.6))}
   .ceo-label{font-size:.7rem;color:#aaa;margin-top:4px;text-align:center}
   .ceo-arrow{position:fixed;top:28px;right:75px;font-size:1.8rem;color:#fa0;animation:arrowBounce .8s ease-in-out infinite;pointer-events:none;z-index:10000}
   @keyframes arrowBounce{0%,100%{transform:translateX(0)}50%{transform:translateX(8px)}}
-
-  /* Smash fist */
-  .smash-fist{position:fixed;top:0;left:0;font-size:2rem;z-index:10001;pointer-events:none;opacity:0;transition:opacity .2s}
-  .smash-fist.visible{opacity:1}
-  .crack-effect{animation: crack 0.4s ease}
-  @keyframes crack{0%{transform:scale(1)}50%{transform:scale(1.05)}100%{transform:scale(1)}}
 
   /* CEO Modal */
   .ceo-modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);z-index:20000;display:none;align-items:center;justify-content:center}
@@ -196,20 +190,37 @@ FRONTEND_HTML = """
 </head>
 <body>
 
-<!-- CEO Badge (Luffy Gear 5) -->
-<div class="ceo-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
-  <img class="ceo-img" id="ceoImage" src="https://i.postimg.cc/q7CYyRTT/Screenshot-20260502-164646.jpg" alt="Luffy Gear 5">
+<!-- Luffy Gear 5 Badge (no background circle, just Luffy) -->
+<div class="luffy-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
+  <svg class="luffy-svg" viewBox="0 0 100 100">
+    <!-- Face -->
+    <circle cx="50" cy="50" r="40" fill="#fff" stroke="#ccc" stroke-width="2"/>
+    <!-- Eyes -->
+    <circle cx="35" cy="45" r="5" fill="#000"/>
+    <circle cx="65" cy="45" r="5" fill="#000"/>
+    <!-- Smile -->
+    <path d="M30 65 Q50 80 70 65" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round"/>
+    <!-- Hair (Gear 5 wavy lines) -->
+    <path d="M10 30 Q5 20 15 10 Q25 0 40 5" fill="none" stroke="#000" stroke-width="3"/>
+    <path d="M90 30 Q95 20 85 10 Q75 0 60 5" fill="none" stroke="#000" stroke-width="3"/>
+    <path d="M10 50 Q0 55 5 65 Q15 70 25 60" fill="none" stroke="#000" stroke-width="3"/>
+    <path d="M90 50 Q100 55 95 65 Q85 70 75 60" fill="none" stroke="#000" stroke-width="3"/>
+    <path d="M10 70 Q15 80 25 85" fill="none" stroke="#000" stroke-width="3"/>
+    <path d="M90 70 Q85 80 75 85" fill="none" stroke="#000" stroke-width="3"/>
+    <!-- Drums of Liberation rays (lightly) -->
+    <path d="M50 5 Q55 0 60 5" fill="none" stroke="#ff0" stroke-width="2"/>
+    <path d="M50 95 Q55 100 60 95" fill="none" stroke="#ff0" stroke-width="2"/>
+    <path d="M5 50 Q0 55 5 60" fill="none" stroke="#ff0" stroke-width="2"/>
+    <path d="M95 50 Q100 55 95 60" fill="none" stroke="#ff0" stroke-width="2"/>
+  </svg>
   <span class="ceo-label">CEO of App</span>
 </div>
 <div class="ceo-arrow">👉</div>
 
-<!-- Smash fist element -->
-<div class="smash-fist" id="smashFist">👊</div>
-
 <!-- CEO Modal -->
 <div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
   <div class="ceo-modal" onclick="event.stopPropagation()">
-    <div style="font-size:2rem;margin-bottom:8px">🐉</div>
+    <div style="font-size:2rem;margin-bottom:8px">👑</div>
     <h2>KAUSHTUBH</h2>
     <div class="title">CEO OF PUSH CLASH</div>
     <div style="color:#ccc;font-size:0.9rem;margin:6px 0">Have a query? Get in touch</div>
@@ -242,7 +253,7 @@ FRONTEND_HTML = """
       <div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#0ff" id="personalBest">0</div><div class="small">Personal Best</div></div>
       <div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#f0f" id="totalBattles">0</div><div class="small">Total Battles</div></div>
     </div>
-    <button class="btn-primary" id="aiBattleBtn" onclick="startChallenge('ai')">🤖 START AI BATTLE</button>
+    <button class="btn-primary" onclick="startChallenge('ai')">🤖 START AI BATTLE</button>
     <button class="btn-secondary" onclick="showLeaderboard()">🏆 Weekly Leaderboard</button>
     <button class="btn-secondary" onclick="resetProfile()">🔄 Leave Arena</button>
     <div class="success-msg" id="saveConfirmation" style="display:none">✅ Score saved to global arena!</div>
@@ -466,39 +477,6 @@ FRONTEND_HTML = """
   // Init
   currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
   if(currentUser){ showScreen('dashboardScreen'); loadStats(); } else { showScreen('setupScreen'); }
-
-  // ---- Luffy Smash Animation ----
-  const fist = document.getElementById('smashFist');
-  const aiBtn = document.getElementById('aiBattleBtn');
-  const badge = document.querySelector('.ceo-img');
-
-  function smashButton() {
-    if (!badge || !aiBtn) return;
-    const badgeRect = badge.getBoundingClientRect();
-    const btnRect = aiBtn.getBoundingClientRect();
-    const startX = badgeRect.left + badgeRect.width/2;
-    const startY = badgeRect.top + badgeRect.height/2;
-    const endX = btnRect.left + btnRect.width/2;
-    const endY = btnRect.top + btnRect.height/2;
-
-    fist.style.left = startX + 'px';
-    fist.style.top = startY + 'px';
-    fist.classList.add('visible');
-    fist.style.transition = 'all 0.3s ease-in';
-    fist.style.left = endX + 'px';
-    fist.style.top = endY + 'px';
-
-    setTimeout(() => {
-      aiBtn.classList.add('crack-effect');
-      setTimeout(() => aiBtn.classList.remove('crack-effect'), 400);
-      fist.style.transition = 'all 0.3s ease-out';
-      fist.style.left = startX + 'px';
-      fist.style.top = startY + 'px';
-      setTimeout(() => { fist.classList.remove('visible'); }, 300);
-    }, 300);
-  }
-
-  setInterval(smashButton, 5000);
 </script>
 </body>
 </html>
