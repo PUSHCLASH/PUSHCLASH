@@ -201,7 +201,7 @@ self.addEventListener('activate', (event) => {
     )
     return response
 
-# ---------- Frontend (logo replaced, everything else unchanged) ----------
+# ---------- Frontend (dragon CEO badge, everything else unchanged) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -378,45 +378,66 @@ FRONTEND_HTML = """
       pointer-events: none;
     }
 
-    /* CEO Badge */
-    .ceo-badge-btn {
+    /* ========== DRAGON CEO BADGE ========== */
+    .dragon-badge-wrap {
       position: fixed;
       top: 15px;
       right: 15px;
       z-index: 10000;
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: url('https://i.postimg.cc/q7CYyRTT/Screenshot-20260502-164646.jpg') center/cover;
-      box-shadow: 0 0 18px #ff4500, 0 0 25px #00bfff;
-      border: none;
+      width: 56px;
+      height: 56px;
       cursor: pointer;
-      color: transparent;
-      animation: fireIcePulse 2s infinite;
     }
-    @keyframes fireIcePulse {
-      0% { box-shadow: 0 0 12px #ff4500, 0 0 20px #00bfff; }
-      50% { box-shadow: 0 0 28px #ff8c00, 0 0 40px #00ffff; }
-      100% { box-shadow: 0 0 12px #ff4500, 0 0 20px #00bfff; }
+    .dragon-orbit {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 100%;
+      height: 100%;
+      animation: spin 4s linear infinite;
     }
-    .ceo-arrow {
-      position: fixed;
-      top: 28px;
-      right: 75px;
-      z-index: 10000;
+    .dragon-orbit.reverse {
+      animation: spin-reverse 4s linear infinite;
+    }
+    .dragon-emoji {
+      position: absolute;
       font-size: 1.8rem;
-      color: #ffaa00;
-      filter: drop-shadow(0 0 6px #ffaa00);
-      animation: arrowBounce 0.8s ease-in-out infinite;
-      pointer-events: none;
+      top: 0;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      filter: drop-shadow(0 0 6px currentColor);
     }
-    @keyframes arrowBounce {
-      0%, 100% { transform: translateX(0); }
-      50% { transform: translateX(8px); }
+    .ice-dragon {
+      color: #00bfff;
+      text-shadow: 0 0 12px #00bfff;
     }
+    .fire-dragon {
+      color: #ff4500;
+      text-shadow: 0 0 12px #ff4500;
+    }
+    @keyframes spin {
+      from { transform: translate(-50%, -50%) rotate(0deg) translateX(28px) rotate(0deg); }
+      to   { transform: translate(-50%, -50%) rotate(360deg) translateX(28px) rotate(-360deg); }
+    }
+    @keyframes spin-reverse {
+      from { transform: translate(-50%, -50%) rotate(0deg) translateX(28px) rotate(0deg); }
+      to   { transform: translate(-50%, -50%) rotate(-360deg) translateX(28px) rotate(360deg); }
+    }
+    .dragon-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 10px;
+      height: 10px;
+      background: white;
+      border-radius: 50%;
+      box-shadow: 0 0 15px white;
+    }
+
     .ceo-badge-tooltip {
       position: fixed;
-      top: 68px;
+      top: 75px;
       right: 10px;
       background: rgba(10,10,10,0.9);
       color: #ccc;
@@ -524,15 +545,22 @@ FRONTEND_HTML = """
     <div class="splash-sub">AI Arena</div>
   </div>
 
-  <!-- CEO Badge with arrow + new logo -->
-  <div class="ceo-arrow">👉</div>
-  <button class="ceo-badge-btn" onclick="document.getElementById('ceoModal').classList.add('active')" title="IKIGAI"></button>
+  <!-- Dragon CEO Badge (replaces static crown) -->
+  <div class="dragon-badge-wrap" onclick="document.getElementById('ceoModal').classList.add('active')" title="IKIGAI">
+    <div class="dragon-orbit">
+      <span class="dragon-emoji ice-dragon">🐉</span>
+    </div>
+    <div class="dragon-orbit reverse">
+      <span class="dragon-emoji fire-dragon">🐉</span>
+    </div>
+    <div class="dragon-center"></div>
+  </div>
   <div class="ceo-badge-tooltip">CEO of App</div>
 
   <!-- CEO Modal -->
   <div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
     <div class="ceo-modal" onclick="event.stopPropagation()">
-      <div style="font-size:2rem; margin-bottom:8px;">👑</div>
+      <div style="font-size:2rem; margin-bottom:8px;">🐉🐉</div>
       <h2>KAUSHTUBH</h2>
       <div class="title">CEO OF PUSH CLASH</div>
       <div style="color:#ccc; font-size:0.9rem; margin:6px 0;">Have a query? Get in touch</div>
