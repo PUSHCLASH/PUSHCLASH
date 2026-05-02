@@ -117,10 +117,12 @@ def manifest():
         "short_name": "PushClash",
         "description": "AI-powered competitive push-up arena",
         "start_url": "/",
+        "scope": "/",
         "display": "standalone",
         "background_color": "#0a0a0a",
         "theme_color": "#ff00ff",
         "orientation": "portrait-primary",
+        "categories": ["fitness", "health", "sports"],
         "icons": [
             {
                 "src": "https://cdn-icons-png.flaticon.com/128/2548/2548538.png",
@@ -128,9 +130,15 @@ def manifest():
                 "type": "image/png"
             },
             {
+                "src": "https://cdn-icons-png.flaticon.com/192/2548/2548538.png",
+                "sizes": "192x192",
+                "type": "image/png"
+            },
+            {
                 "src": "https://cdn-icons-png.flaticon.com/512/2548/2548538.png",
                 "sizes": "512x512",
-                "type": "image/png"
+                "type": "image/png",
+                "purpose": "any maskable"
             }
         ]
     })
@@ -138,31 +146,62 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     response = app.response_class(
-        response="""self.addEventListener('install', (event) => {
-    event.waitUntil(
-        caches.open('pushclash-v1').then((cache) => {
-            return cache.addAll([
-                '/',
-                '/manifest.json',
-                'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4',
-                'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2'
-            ]);
-        })
-    );
+        response="""const CACHE_NAME = 'pushclash-v2';
+const urlsToCache = [
+  '/',
+  '/manifest.json',
+  'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4',
+  'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2'
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(urlsToCache);
+    })
+  );
 });
 
 self.addEventListener('fetch', (event) => {
-    event.respondWith(
-        caches.match(event.request).then((response) => {
-            return response || fetch(event.request);
+  event.respondWith(
+    caches.match(event.request).then((response) => {
+      if (response) {
+        return response;
+      }
+      const fetchRequest = event.request.clone();
+      return fetch(fetchRequest).then((response) => {
+        if(!response || response.status !== 200 || response.type !== 'basic') {
+          return response;
+        }
+        const responseToCache = response.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(event.request, responseToCache);
+        });
+        return response;
+      });
+    })
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  const cacheWhitelist = [CACHE_NAME];
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (!cacheWhitelist.includes(cacheName)) {
+            return caches.delete(cacheName);
+          }
         })
-    );
+      );
+    })
+  );
 });""",
         mimetype='application/javascript'
     )
     return response
 
-# ---------- Frontend (angle counter + champion voice + weekly leaderboard + PWA + CEO badge + splash screen) ----------
+# ---------- Frontend (with new arrow animation for CEO badge) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -364,6 +403,22 @@ FRONTEND_HTML = """
       50% { box-shadow: 0 0 28px #ff8c00, 0 0 40px #00ffff; }
       100% { box-shadow: 0 0 12px #ff4500, 0 0 20px #00bfff; }
     }
+    /* Arrow animation pointing to the CEO badge */
+    .ceo-arrow {
+      position: fixed;
+      top: 28px;
+      right: 75px;  /* to the left of the badge */
+      z-index: 10000;
+      font-size: 1.8rem;
+      color: #ffaa00;
+      filter: drop-shadow(0 0 6px #ffaa00);
+      animation: arrowBounce 0.8s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes arrowBounce {
+      0%, 100% { transform: translateX(0); }
+      50% { transform: translateX(8px); }
+    }
     .ceo-badge-tooltip {
       position: fixed;
       top: 68px;
@@ -474,7 +529,8 @@ FRONTEND_HTML = """
     <div class="splash-sub">AI Arena</div>
   </div>
 
-  <!-- CEO Badge (outside app container, fixed) -->
+  <!-- CEO Badge with arrow -->
+  <div class="ceo-arrow">👉</div>
   <button class="ceo-badge-btn" onclick="document.getElementById('ceoModal').classList.add('active')" title="CEO of PushClash">👑</button>
   <div class="ceo-badge-tooltip">CEO of App</div>
 
@@ -568,7 +624,7 @@ FRONTEND_HTML = """
     setTimeout(() => {
       const splash = document.getElementById('splashScreen');
       if (splash) splash.style.display = 'none';
-    }, 3300); // slightly longer than CSS animation delay to ensure it's fully hidden
+    }, 3300);
   });
 
   let currentUser = null;
