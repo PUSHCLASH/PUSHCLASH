@@ -132,7 +132,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Luffy Gear 5 badge, no smash, all screens) ----------
+# ---------- Frontend (Luffy Gear 5 real image badge) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -171,9 +171,9 @@ FRONTEND_HTML = """
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.7);color:#fa0;padding:4px 8px;border-radius:6px;font-size:14px;pointer-events:none}
 
-  /* Luffy Gear 5 Badge */
+  /* CEO Badge with real Luffy image */
   .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
-  .luffy-svg{width:55px;height:55px;filter:drop-shadow(0 0 8px rgba(255,255,255,0.6))}
+  .luffy-img{width:55px;height:55px;border-radius:50%;object-fit:cover;border:2px solid #ff4500;box-shadow:0 0 15px #ff4500,0 0 25px #00bfff}
   .ceo-label{font-size:.7rem;color:#aaa;margin-top:4px;text-align:center}
   .ceo-arrow{position:fixed;top:28px;right:75px;font-size:1.8rem;color:#fa0;animation:arrowBounce .8s ease-in-out infinite;pointer-events:none;z-index:10000}
   @keyframes arrowBounce{0%,100%{transform:translateX(0)}50%{transform:translateX(8px)}}
@@ -190,40 +190,9 @@ FRONTEND_HTML = """
 </head>
 <body>
 
-<!-- LUFFY GEAR 5 BADGE – guaranteed to appear -->
+<!-- REAL LUFFY GEAR 5 IMAGE BADGE -->
 <div class="luffy-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
-  <svg class="luffy-svg" viewBox="0 0 120 120">
-    <!-- Radiant background (soft glow, no hard circle) -->
-    <circle cx="60" cy="60" r="50" fill="none" stroke="url(#glowGrad)" stroke-width="4"/>
-    <defs>
-      <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#fff" stop-opacity="0.9"/>
-        <stop offset="100%" stop-color="#ff0" stop-opacity="0.2"/>
-      </radialGradient>
-    </defs>
-
-    <!-- Face -->
-    <circle cx="60" cy="60" r="35" fill="#ffe6cc" stroke="#000" stroke-width="3"/>
-
-    <!-- Eyes (big happy circles) -->
-    <circle cx="45" cy="52" r="7" fill="#000"/>
-    <circle cx="75" cy="52" r="7" fill="#000"/>
-    <!-- Eye highlights -->
-    <circle cx="47" cy="50" r="2.5" fill="#fff"/>
-    <circle cx="77" cy="50" r="2.5" fill="#fff"/>
-
-    <!-- Happy mouth -->
-    <path d="M35 70 Q60 90 85 70" fill="none" stroke="#000" stroke-width="4" stroke-linecap="round"/>
-
-    <!-- Gear 5 spiky hair (flames) -->
-    <path d="M25 35 L15 20 L35 30" fill="none" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M40 22 L35 5 L50 18" fill="none" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M60 15 L60 0 L72 15" fill="none" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M78 22 L85 8 L90 28" fill="none" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M95 35 L108 20 L95 42" fill="none" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M20 55 L5 50 L22 62" fill="none" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M100 55 L115 50 L98 62" fill="none" stroke="#000" stroke-width="4" stroke-linejoin="round"/>
-  </svg>
+  <img class="luffy-img" src="https://kommodo.ai/i/42fRTRSluoYYwXk4mPQL" alt="Luffy Gear 5">
   <span class="ceo-label">CEO of App</span>
 </div>
 <div class="ceo-arrow">👉</div>
