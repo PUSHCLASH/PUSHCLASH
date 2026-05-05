@@ -132,7 +132,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (instruction screen added) ----------
+# ---------- Frontend (camera black screen fix + all previous features) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -163,13 +163,15 @@ FRONTEND_HTML = """
   .score-date{font-size:.75rem;color:#888;margin-left:6px}
   .result-msg{text-align:center;font-size:1.3rem;margin:12px 0;font-style:italic;color:#f0f}
   .small{font-size:.85rem;color:#aaa}.share-btn{background:#0ff;color:black}
-  video,canvas{width:100%;border-radius:14px;display:none}
-  #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden}
-  #aiCameraUI video,#aiCameraUI canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
-  .angle-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;font-weight:800;color:#0ff;text-shadow:0 0 30px cyan;pointer-events:none}
-  .rep-flash{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:3rem;font-weight:800;color:#0f0;animation:fadeInOut .8s ease}
+
+  /* Camera fix – remove global display:none */
+  video, canvas{width:100%;border-radius:14px}
+  #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden;background:#000}
+  #aiCameraUI video,#aiCameraUI canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+  .angle-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;font-weight:800;color:#0ff;text-shadow:0 0 30px cyan;pointer-events:none;z-index:5}
+  .rep-flash{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:3rem;font-weight:800;color:#0f0;text-shadow:0 0 30px green;z-index:6;animation:fadeInOut .8s ease}
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
-  .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.7);color:#fa0;padding:4px 8px;border-radius:6px;font-size:14px;pointer-events:none}
+  .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.8);color:#fa0;padding:6px 12px;border-radius:8px;font-size:16px;font-weight:bold;z-index:7;pointer-events:none}
 
   /* CEO Badge */
   .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
@@ -247,14 +249,9 @@ FRONTEND_HTML = """
       <label for="agreeCheck">I have read all instructions carefully</label>
     </div>
     <button class="btn-primary" id="enterArenaBtn" disabled onclick="showScreen('dashboardScreen'); loadStats(); speakWelcome();">⚡ I'M READY, ENTER ARENA ⚡</button>
-    <script>
-      document.getElementById('agreeCheck').addEventListener('change', function() {
-        document.getElementById('enterArenaBtn').disabled = !this.checked;
-      });
-    </script>
   </div>
 
-  <!-- Dashboard, Challenge, Leaderboard screens (unchanged) -->
+  <!-- Dashboard -->
   <div id="dashboardScreen" class="screen">
     <h1>PUSHCLASH</h1>
     <p style="font-size:1.4rem">Welcome, <span id="dashName"></span>!</p>
@@ -269,12 +266,19 @@ FRONTEND_HTML = """
     <div class="success-msg" id="saveConfirmation" style="display:none">✅ Score saved to global arena!</div>
   </div>
 
+  <!-- Challenge Screen (camera fixed) -->
   <div id="challengeScreen" class="screen">
     <div id="countdownDisplay" class="timer-big" style="font-size:4rem">3</div>
     <div id="challengeActiveUI" style="display:none">
       <div class="timer-big" id="timerDisplay">60</div>
       <div class="counter-big" id="repCounter">0</div>
-      <div id="aiCameraUI"><video id="webcam" autoplay playsinline></video><canvas id="poseCanvas"></canvas><div class="angle-overlay" id="angleOverlay"></div><div class="rep-flash" id="repFlash" style="display:none">REP!</div><div class="debug-msg" id="debugMsg"></div></div>
+      <div id="aiCameraUI">
+        <video id="webcam" autoplay playsinline style="display:block"></video>
+        <canvas id="poseCanvas" style="display:block"></canvas>
+        <div class="angle-overlay" id="angleOverlay"></div>
+        <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
+        <div class="debug-msg" id="debugMsg"></div>
+      </div>
     </div>
     <div id="battleResultUI" style="display:none;text-align:center">
       <h2>⚔️ Battle Over!</h2>
@@ -286,6 +290,7 @@ FRONTEND_HTML = """
     </div>
   </div>
 
+  <!-- Leaderboard Screen -->
   <div id="leaderboardScreen" class="screen">
     <h1>WEEKLY RANKINGS</h1>
     <p class="small" style="text-align:center">Top 10 of the last 7 days</p>
@@ -297,7 +302,6 @@ FRONTEND_HTML = """
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
 <script>
-  // (All existing JavaScript – with a tiny change in saveProfile to go to instruction screen)
   let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval, countdownInterval, challengeMode = 'ai', aiDetector = null, aiStream = null;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
@@ -329,10 +333,13 @@ FRONTEND_HTML = """
     err.textContent = '';
     currentUser = {name: n, nationality: nat, email: em};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
-    showScreen('instructionScreen');   // <-- Changed to instruction screen
+    showScreen('instructionScreen');
   }
 
-  // (rest of the functions unchanged)
+  document.getElementById('agreeCheck').addEventListener('change', function() {
+    document.getElementById('enterArenaBtn').disabled = !this.checked;
+  });
+
   function resetProfile(){ localStorage.removeItem('pushclash_user'); currentUser=null; showScreen('setupScreen'); }
   function showScreen(id){ document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active')); document.getElementById(id).classList.add('active'); if(id!=='dashboardScreen') document.getElementById('saveConfirmation').style.display='none'; }
   function goToDashboard(){ if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; } loadStats(); showScreen('dashboardScreen'); }
@@ -370,9 +377,12 @@ FRONTEND_HTML = """
     document.getElementById('challengeActiveUI').style.display='block';
     document.getElementById('timerDisplay').textContent = timeLeft;
     document.getElementById('repCounter').textContent = '0';
+    const video = document.getElementById('webcam');
+    video.style.display = 'block';     // ensure visibility
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
     await startAICamera();
+
     challengeInterval = setInterval(()=>{
       timeLeft--;
       document.getElementById('timerDisplay').textContent = timeLeft;
@@ -382,18 +392,36 @@ FRONTEND_HTML = """
 
   let angleBuffer = [], lastRepTime = 0, aiState = 'up';
   async function startAICamera(){
-    const video = document.getElementById('webcam'), canvas = document.getElementById('poseCanvas'), ctx = canvas.getContext('2d'), debugMsg = document.getElementById('debugMsg');
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('poseCanvas');
+    const ctx = canvas.getContext('2d');
+    const debugMsg = document.getElementById('debugMsg');
+
     try {
-      aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      video.srcObject = aiStream; await video.play();
-      debugMsg.textContent = '📹 Camera active, loading AI...';
-    } catch(e) { debugMsg.textContent = '❌ Camera access denied!'; return; }
-    video.addEventListener('loadedmetadata', ()=>{ canvas.width = video.videoWidth; canvas.height = video.videoHeight; });
+      aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: {ideal: 320}, height: {ideal: 240} } });
+      video.srcObject = aiStream;
+      await video.play();
+      debugMsg.textContent = '✅ AI ready – show yourself!';
+      canvas.style.display = 'block';
+    } catch(e) {
+      debugMsg.textContent = '❌ Camera access denied! Please allow camera in settings.';
+      video.style.display = 'none';
+      return;
+    }
+
+    video.addEventListener('loadedmetadata', () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    });
+
     try {
       const cfg = { modelType: 'SinglePose.Lightning' };
       aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, cfg);
-      debugMsg.textContent = '✅ AI ready – show yourself!';
-    } catch(e) { debugMsg.textContent = '❌ AI model failed to load. Check internet.'; return; }
+    } catch(e) {
+      debugMsg.textContent = '❌ AI model failed to load. Check your internet.';
+      return;
+    }
+
     angleBuffer = []; lastRepTime = 0; aiState = 'up';
     requestAnimationFrame(detectPose);
   }
