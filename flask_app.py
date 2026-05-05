@@ -37,7 +37,6 @@ def init_db():
         )''')
         db.commit()
 
-# (API Endpoints – unchanged, omitted for brevity but they are in the full code)
 # ---------- API Endpoints ----------
 @app.route('/api/battle', methods=['POST'])
 def record_battle():
@@ -126,43 +125,14 @@ def manifest():
         ]
     })
 
-# UPDATED SERVICE WORKER with new cache key
 @app.route('/sw.js')
 def service_worker():
     return app.response_class(
-        response="""const CACHE_NAME = 'pushclash-v3';
-const urlsToCache = [
-  '/',
-  '/manifest.json',
-  'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4',
-  'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2'
-];
-
-self.addEventListener('install', event => {
-  self.skipWaiting();
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
-  );
-});
-
-self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(cacheNames => Promise.all(
-      cacheNames.filter(name => name !== CACHE_NAME).map(name => caches.delete(name))
-    ))
-  );
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', event => {
-  event.respondWith(
-    caches.match(event.request).then(response => response || fetch(event.request))
-  );
-});""",
+        response="""const CACHE_NAME='pushclash-v3';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json']))) });self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))) });""",
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (final Luffy badge with all your changes) ----------
+# ---------- Frontend (instruction screen added) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -201,7 +171,7 @@ FRONTEND_HTML = """
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.7);color:#fa0;padding:4px 8px;border-radius:6px;font-size:14px;pointer-events:none}
 
-  /* UPDATED CEO BADGE */
+  /* CEO Badge */
   .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
   .luffy-img{width:70px;height:70px;border-radius:50%;object-fit:cover;border:none;box-shadow:0 0 15px rgba(0,191,255,0.6),0 0 30px rgba(255,69,0,0.4)}
   .ceo-label{font-size:.7rem;color:#ddd;margin-top:6px;background:rgba(0,0,0,0.7);padding:3px 10px;border-radius:12px;text-align:center}
@@ -216,11 +186,19 @@ FRONTEND_HTML = """
   .ceo-modal .title{color:#fa0;font-weight:bold;margin-bottom:10px;font-size:.95rem}
   .ceo-modal .phone{color:#0ff;font-size:1.3rem;margin:8px 0;font-weight:bold}
   .close-btn{background:none;border:1px solid #555;color:#aaa;padding:6px 20px;border-radius:20px;margin-top:18px;cursor:pointer}
+
+  /* Instruction screen */
+  .instruction-box{background:rgba(0,0,0,0.8);border-radius:20px;padding:20px;margin:20px 0}
+  .instruction-box p{font-size:1rem;line-height:1.8;margin:8px 0;color:#ddd}
+  .instruction-box .emoji{font-size:1.3rem}
+  .checkbox-row{display:flex;align-items:center;gap:12px;margin:20px 0;justify-content:center}
+  .checkbox-row input{width:20px;height:20px;accent-color:#ff4500}
+  .checkbox-row label{font-size:0.9rem;color:#ccc}
 </style>
 </head>
 <body>
 
-<!-- PERMANENT LUFFY GEAR 5 BADGE (UPDATED) -->
+<!-- LUFFY GEAR 5 BADGE (unchanged) -->
 <div class="luffy-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
   <img class="luffy-img" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
   <span class="ceo-label">CEO of App</span>
@@ -240,8 +218,8 @@ FRONTEND_HTML = """
   </div>
 </div>
 
-<!-- rest of the app screens – unchanged -->
 <div class="app-container" id="app">
+  <!-- Setup Screen -->
   <div id="setupScreen" class="screen active">
     <h1>PUSHCLASH</h1>
     <div class="arena-subtitle">⚔️ ENTER THE ARENA ⚔️</div>
@@ -254,6 +232,29 @@ FRONTEND_HTML = """
     <p class="small" style="text-align:center;margin-top:16px">Only real warriors dare to compete</p>
   </div>
 
+  <!-- Instruction Screen (NEW) -->
+  <div id="instructionScreen" class="screen">
+    <h1 style="font-size:2rem;margin-bottom:20px">🚀 WELCOME, WARRIOR!</h1>
+    <div class="instruction-box">
+      <p><span class="emoji">🤖</span> PushClash is an <strong>AI fitness battlefield</strong> where you crush push‑ups and your reps are counted live by our AI referee.</p>
+      <p><span class="emoji">⏱️</span> You get <strong>60 seconds</strong> to do as many clean push‑ups as possible. Every rep counts, every second matters.</p>
+      <p><span class="emoji">🏆</span> Your best score hits the <strong>Weekly Global Leaderboard</strong>. Rise up, own your nation, become the #1 push‑up legend.</p>
+      <p><span class="emoji">👑</span> This app was built with pure hustle by <strong>Kaushtubh (CEO)</strong>. Tap the Luffy badge anytime to see who's running the show.</p>
+      <p><span class="emoji">🔥</span> No mercy, no shortcuts. Only raw power brings glory. Ready to turn your body into a weapon?</p>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="agreeCheck">
+      <label for="agreeCheck">I have read all instructions carefully</label>
+    </div>
+    <button class="btn-primary" id="enterArenaBtn" disabled onclick="showScreen('dashboardScreen'); loadStats(); speakWelcome();">⚡ I'M READY, ENTER ARENA ⚡</button>
+    <script>
+      document.getElementById('agreeCheck').addEventListener('change', function() {
+        document.getElementById('enterArenaBtn').disabled = !this.checked;
+      });
+    </script>
+  </div>
+
+  <!-- Dashboard, Challenge, Leaderboard screens (unchanged) -->
   <div id="dashboardScreen" class="screen">
     <h1>PUSHCLASH</h1>
     <p style="font-size:1.4rem">Welcome, <span id="dashName"></span>!</p>
@@ -296,7 +297,7 @@ FRONTEND_HTML = """
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
 <script>
-  // (All existing JavaScript – unchanged)
+  // (All existing JavaScript – with a tiny change in saveProfile to go to instruction screen)
   let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval, countdownInterval, challengeMode = 'ai', aiDetector = null, aiStream = null;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
@@ -328,11 +329,10 @@ FRONTEND_HTML = """
     err.textContent = '';
     currentUser = {name: n, nationality: nat, email: em};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
-    speakWelcome();
-    showScreen('dashboardScreen');
-    loadStats();
+    showScreen('instructionScreen');   // <-- Changed to instruction screen
   }
 
+  // (rest of the functions unchanged)
   function resetProfile(){ localStorage.removeItem('pushclash_user'); currentUser=null; showScreen('setupScreen'); }
   function showScreen(id){ document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active')); document.getElementById(id).classList.add('active'); if(id!=='dashboardScreen') document.getElementById('saveConfirmation').style.display='none'; }
   function goToDashboard(){ if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; } loadStats(); showScreen('dashboardScreen'); }
