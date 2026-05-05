@@ -37,6 +37,7 @@ def init_db():
         )''')
         db.commit()
 
+# (API Endpoints – unchanged, omitted for brevity but they are in the full code)
 # ---------- API Endpoints ----------
 @app.route('/api/battle', methods=['POST'])
 def record_battle():
@@ -125,14 +126,43 @@ def manifest():
         ]
     })
 
+# UPDATED SERVICE WORKER with new cache key
 @app.route('/sw.js')
 def service_worker():
     return app.response_class(
-        response="""const CACHE_NAME='pushclash-v2';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json']))) });self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))) });""",
+        response="""const CACHE_NAME = 'pushclash-v3';
+const urlsToCache = [
+  '/',
+  '/manifest.json',
+  'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4',
+  'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2'
+];
+
+self.addEventListener('install', event => {
+  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
+  );
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(cacheNames => Promise.all(
+      cacheNames.filter(name => name !== CACHE_NAME).map(name => caches.delete(name))
+    ))
+  );
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', event => {
+  event.respondWith(
+    caches.match(event.request).then(response => response || fetch(event.request))
+  );
+});""",
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Luffy badge updated: larger, no red border, white arrow, boxed label) ----------
+# ---------- Frontend (final Luffy badge with all your changes) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -197,7 +227,7 @@ FRONTEND_HTML = """
 </div>
 <div class="ceo-arrow">👉</div>
 
-<!-- CEO Modal -->
+<!-- CEO Modal (unchanged) -->
 <div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
   <div class="ceo-modal" onclick="event.stopPropagation()">
     <div style="font-size:2rem;margin-bottom:8px">👑</div>
@@ -210,8 +240,8 @@ FRONTEND_HTML = """
   </div>
 </div>
 
+<!-- rest of the app screens – unchanged -->
 <div class="app-container" id="app">
-  <!-- Setup Screen -->
   <div id="setupScreen" class="screen active">
     <h1>PUSHCLASH</h1>
     <div class="arena-subtitle">⚔️ ENTER THE ARENA ⚔️</div>
@@ -224,7 +254,6 @@ FRONTEND_HTML = """
     <p class="small" style="text-align:center;margin-top:16px">Only real warriors dare to compete</p>
   </div>
 
-  <!-- Dashboard -->
   <div id="dashboardScreen" class="screen">
     <h1>PUSHCLASH</h1>
     <p style="font-size:1.4rem">Welcome, <span id="dashName"></span>!</p>
@@ -239,7 +268,6 @@ FRONTEND_HTML = """
     <div class="success-msg" id="saveConfirmation" style="display:none">✅ Score saved to global arena!</div>
   </div>
 
-  <!-- Challenge Screen -->
   <div id="challengeScreen" class="screen">
     <div id="countdownDisplay" class="timer-big" style="font-size:4rem">3</div>
     <div id="challengeActiveUI" style="display:none">
@@ -257,7 +285,6 @@ FRONTEND_HTML = """
     </div>
   </div>
 
-  <!-- Leaderboard Screen -->
   <div id="leaderboardScreen" class="screen">
     <h1>WEEKLY RANKINGS</h1>
     <p class="small" style="text-align:center">Top 10 of the last 7 days</p>
@@ -269,6 +296,7 @@ FRONTEND_HTML = """
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
 <script>
+  // (All existing JavaScript – unchanged)
   let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval, countdownInterval, challengeMode = 'ai', aiDetector = null, aiStream = null;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
