@@ -132,7 +132,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Luffy Gear 5 badge with your permanent raw URL) ----------
+# ---------- Frontend (Luffy badge updated: larger, no red border, white arrow, boxed label) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -171,11 +171,11 @@ FRONTEND_HTML = """
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.7);color:#fa0;padding:4px 8px;border-radius:6px;font-size:14px;pointer-events:none}
 
-  /* CEO Badge with permanent Luffy image */
+  /* UPDATED CEO BADGE */
   .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
-  .luffy-img{width:55px;height:55px;border-radius:50%;object-fit:cover;border:2px solid #ff4500;box-shadow:0 0 15px #ff4500,0 0 25px #00bfff}
-  .ceo-label{font-size:.7rem;color:#aaa;margin-top:4px;text-align:center}
-  .ceo-arrow{position:fixed;top:28px;right:75px;font-size:1.8rem;color:#fa0;animation:arrowBounce .8s ease-in-out infinite;pointer-events:none;z-index:10000}
+  .luffy-img{width:70px;height:70px;border-radius:50%;object-fit:cover;border:none;box-shadow:0 0 15px rgba(0,191,255,0.6),0 0 30px rgba(255,69,0,0.4)}
+  .ceo-label{font-size:.7rem;color:#ddd;margin-top:6px;background:rgba(0,0,0,0.7);padding:3px 10px;border-radius:12px;text-align:center}
+  .ceo-arrow{position:fixed;top:30px;right:90px;font-size:1.8rem;color:#fff;animation:arrowBounce .8s ease-in-out infinite;pointer-events:none;z-index:10000;filter:drop-shadow(0 0 6px rgba(255,255,255,0.8))}
   @keyframes arrowBounce{0%,100%{transform:translateX(0)}50%{transform:translateX(8px)}}
 
   /* CEO Modal */
@@ -190,7 +190,7 @@ FRONTEND_HTML = """
 </head>
 <body>
 
-<!-- PERMANENT LUFFY GEAR 5 BADGE -->
+<!-- PERMANENT LUFFY GEAR 5 BADGE (UPDATED) -->
 <div class="luffy-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
   <img class="luffy-img" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
   <span class="ceo-label">CEO of App</span>
