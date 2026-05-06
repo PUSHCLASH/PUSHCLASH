@@ -128,11 +128,11 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     return app.response_class(
-        response="""const CACHE_NAME='pushclash-v4';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json']))) });self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))) });""",
+        response="""const CACHE_NAME='pushclash-v3';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json']))) });self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))) });""",
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (camera 100% visible) ----------
+# ---------- Frontend (camera black screen fix + all previous features) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -164,11 +164,10 @@ FRONTEND_HTML = """
   .result-msg{text-align:center;font-size:1.3rem;margin:12px 0;font-style:italic;color:#f0f}
   .small{font-size:.85rem;color:#aaa}.share-btn{background:#0ff;color:black}
 
-  /* CAMERA ALWAYS VISIBLE */
-  video,canvas{width:100%;border-radius:14px;background:#000}
-  #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden;background:#000;display:block}
-  #aiCameraUI video{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2}
-  #aiCameraUI canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:3}
+  /* Camera fix – remove global display:none */
+  video, canvas{width:100%;border-radius:14px}
+  #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden;background:#000}
+  #aiCameraUI video,#aiCameraUI canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
   .angle-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;font-weight:800;color:#0ff;text-shadow:0 0 30px cyan;pointer-events:none;z-index:5}
   .rep-flash{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:3rem;font-weight:800;color:#0f0;text-shadow:0 0 30px green;z-index:6;animation:fadeInOut .8s ease}
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
@@ -201,14 +200,14 @@ FRONTEND_HTML = """
 </head>
 <body>
 
-<!-- LUFFY GEAR 5 BADGE -->
+<!-- LUFFY GEAR 5 BADGE (unchanged) -->
 <div class="luffy-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
   <img class="luffy-img" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
   <span class="ceo-label">CEO of App</span>
 </div>
 <div class="ceo-arrow">👉</div>
 
-<!-- CEO Modal -->
+<!-- CEO Modal (unchanged) -->
 <div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
   <div class="ceo-modal" onclick="event.stopPropagation()">
     <div style="font-size:2rem;margin-bottom:8px">👑</div>
@@ -235,7 +234,7 @@ FRONTEND_HTML = """
     <p class="small" style="text-align:center;margin-top:16px">Only real warriors dare to compete</p>
   </div>
 
-  <!-- Instruction Screen -->
+  <!-- Instruction Screen (NEW) -->
   <div id="instructionScreen" class="screen">
     <h1 style="font-size:2rem;margin-bottom:20px">🚀 WELCOME, WARRIOR!</h1>
     <div class="instruction-box">
@@ -267,7 +266,7 @@ FRONTEND_HTML = """
     <div class="success-msg" id="saveConfirmation" style="display:none">✅ Score saved to global arena!</div>
   </div>
 
-  <!-- Challenge Screen – video always visible -->
+  <!-- Challenge Screen (camera fixed) -->
   <div id="challengeScreen" class="screen">
     <div id="countdownDisplay" class="timer-big" style="font-size:4rem">3</div>
     <div id="challengeActiveUI" style="display:none">
@@ -379,7 +378,7 @@ FRONTEND_HTML = """
     document.getElementById('timerDisplay').textContent = timeLeft;
     document.getElementById('repCounter').textContent = '0';
     const video = document.getElementById('webcam');
-    video.style.display = 'block';
+    video.style.display = 'block';     // ensure visibility
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
     await startAICamera();
