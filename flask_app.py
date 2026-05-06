@@ -164,7 +164,7 @@ FRONTEND_HTML = """
   .result-msg{text-align:center;font-size:1.3rem;margin:12px 0;font-style:italic;color:#f0f}
   .small{font-size:.85rem;color:#aaa}.share-btn{background:#0ff;color:black}
 
-  /* Camera always visible – exactly like the version that showed your face */
+  /* Camera always visible */
   video,canvas{width:100%;border-radius:14px;background:#000}
   #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden;background:#000;display:block}
   #aiCameraUI video{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2}
@@ -274,8 +274,8 @@ FRONTEND_HTML = """
       <div class="timer-big" id="timerDisplay">60</div>
       <div class="counter-big" id="repCounter">0</div>
       <div id="aiCameraUI">
-        <video id="webcam" autoplay playsinline style="display:block"></video>
-        <canvas id="poseCanvas" style="display:block"></canvas>
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="poseCanvas"></canvas>
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
         <div class="debug-msg" id="debugMsg"></div>
@@ -383,8 +383,6 @@ FRONTEND_HTML = """
     document.getElementById('timerDisplay').textContent = timeLeft;
     document.getElementById('repCounter').textContent = '0';
 
-    const video = document.getElementById('webcam');
-    video.style.display = 'block';                // ENSURE VISIBLE
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
 
@@ -397,7 +395,7 @@ FRONTEND_HTML = """
     }, 1000);
   }
 
-  // -------------------- AI CAMERA (ANGLE COUNTER) --------------------
+  // -------------------- AI CAMERA (NO RESOLUTION CONSTRAINTS) --------------------
   let angleBuffer = [], lastRepTime = 0, aiState = 'up';
 
   async function startAICamera(){
@@ -407,14 +405,12 @@ FRONTEND_HTML = """
     const debugMsg = document.getElementById('debugMsg');
 
     try {
-      aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: {ideal: 320}, height: {ideal: 240} } });
+      aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       video.srcObject = aiStream;
       await video.play();
-      canvas.style.display = 'block';
       debugMsg.textContent = '✅ AI ready – show yourself!';
     } catch(e) {
       debugMsg.textContent = '❌ Camera access denied! Please allow camera in settings.';
-      video.style.display = 'none';
       return;
     }
 
