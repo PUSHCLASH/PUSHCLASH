@@ -1,11 +1,36 @@
 import sqlite3
 import os
+import time
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, g
+from threading import Lock
 
 app = Flask(__name__)
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pushclash.db')
 
+# ---------- Active user tracking (48-hour inactivity) ----------
+active_users = {}          # email -> last_active_timestamp
+active_users_lock = Lock()
+INACTIVITY_LIMIT = 172800  # 48 hours in seconds
+
+def update_active_user(email):
+    with active_users_lock:
+        active_users[email] = time.time()
+
+def cleanup_active_users():
+    """Remove users inactive for more than 48 hours."""
+    now = time.time()
+    with active_users_lock:
+        stale = [email for email, t in active_users.items() if now - t > INACTIVITY_LIMIT]
+        for email in stale:
+            del active_users[email]
+
+def get_active_count():
+    cleanup_active_users()
+    with active_users_lock:
+        return len(active_users)
+
+# ---------- Database setup ----------
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
@@ -93,6 +118,8 @@ def leaderboard():
 def user_stats():
     data = request.get_json()
     email = data.get('email')
+    if email:
+        update_active_user(email)
     if not email:
         return jsonify({'totalBattles': 0, 'personalBest': 0, 'rank': '-'})
     db = get_db()
@@ -105,6 +132,10 @@ def user_stats():
     ''', (seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'), email, seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'))).fetchone()
     rank = rank_row['rank'] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
+
+@app.route('/api/active_users')
+def active_users_endpoint():
+    return jsonify({'count': get_active_count()})
 
 # ---------- PWA Routes ----------
 @app.route('/manifest.json')
@@ -132,7 +163,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (camera working + instant counting) ----------
+# ---------- Frontend (camera fix + instruction screen + Luffy badge + active user count) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -164,7 +195,6 @@ FRONTEND_HTML = """
   .result-msg{text-align:center;font-size:1.3rem;margin:12px 0;font-style:italic;color:#f0f}
   .small{font-size:.85rem;color:#aaa}.share-btn{background:#0ff;color:black}
 
-  /* Camera always visible */
   video,canvas{width:100%;border-radius:14px;background:#000}
   #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden;background:#000;display:block}
   #aiCameraUI video{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2}
@@ -180,6 +210,11 @@ FRONTEND_HTML = """
   .ceo-label{font-size:.7rem;color:#ddd;margin-top:6px;background:rgba(0,0,0,0.7);padding:3px 10px;border-radius:12px;text-align:center}
   .ceo-arrow{position:fixed;top:30px;right:90px;font-size:1.8rem;color:#fff;animation:arrowBounce .8s ease-in-out infinite;pointer-events:none;z-index:10000;filter:drop-shadow(0 0 6px rgba(255,255,255,0.8))}
   @keyframes arrowBounce{0%,100%{transform:translateX(0)}50%{transform:translateX(8px)}}
+
+  /* Active Users Pill */
+  .active-users-pill{position:fixed;top:15px;left:15px;z-index:10000;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);padding:6px 12px;border-radius:20px;border:1px solid rgba(0,255,255,0.4);box-shadow:0 0 12px rgba(0,255,255,0.3)}
+  .active-users-pill .user-icon{font-size:1.2rem;}
+  .active-users-pill .count{font-weight:bold;font-size:1rem;color:#0ff}
 
   /* CEO Modal */
   .ceo-modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);z-index:20000;display:none;align-items:center;justify-content:center}
@@ -200,6 +235,13 @@ FRONTEND_HTML = """
 </style>
 </head>
 <body>
+
+<!-- ACTIVE USERS PILL (top-left) -->
+<div class="active-users-pill" id="activeUsersPill">
+  <span class="user-icon">👥</span>
+  <span class="count" id="activeUserCount">0</span>
+  <span style="font-size:0.8rem;color:#aaa">online</span>
+</div>
 
 <!-- LUFFY GEAR 5 BADGE -->
 <div class="luffy-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
@@ -308,6 +350,17 @@ FRONTEND_HTML = """
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
+  // ---------- Active user count updater ----------
+  async function refreshActiveCount() {
+    try {
+      const res = await fetch('/api/active_users');
+      const data = await res.json();
+      document.getElementById('activeUserCount').textContent = data.count;
+    } catch(e) {}
+  }
+  setInterval(refreshActiveCount, 10000);
+  window.addEventListener('load', refreshActiveCount);
+
   // -------------------- VOICE HELPERS --------------------
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
@@ -337,6 +390,7 @@ FRONTEND_HTML = """
     err.textContent = '';
     currentUser = {name: n, nationality: nat, email: em};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
+    fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: em})});
     showScreen('instructionScreen');
   }
 
@@ -356,6 +410,7 @@ FRONTEND_HTML = """
     const data = await res.json();
     document.getElementById('personalBest').textContent = data.personalBest;
     document.getElementById('totalBattles').textContent = data.totalBattles;
+    refreshActiveCount();
   }
 
   // -------------------- CHALLENGE START --------------------
@@ -393,6 +448,7 @@ FRONTEND_HTML = """
       document.getElementById('timerDisplay').textContent = timeLeft;
       if(timeLeft<=0){ clearInterval(challengeInterval); endBattle(); }
     }, 1000);
+    if(currentUser) fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
   }
 
   // -------------------- AI CAMERA (NO RESOLUTION CONSTRAINTS) --------------------
