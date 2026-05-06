@@ -8,17 +8,17 @@ from threading import Lock
 app = Flask(__name__)
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pushclash.db')
 
-# ---------- Active user tracking (48-hour inactivity) ----------
+# ---------- Active user tracking (10-second inactivity) ----------
 active_users = {}          # email -> last_active_timestamp
 active_users_lock = Lock()
-INACTIVITY_LIMIT = 172800  # 48 hours in seconds
+INACTIVITY_LIMIT = 10      # seconds
 
 def update_active_user(email):
     with active_users_lock:
         active_users[email] = time.time()
 
 def cleanup_active_users():
-    """Remove users inactive for more than 48 hours."""
+    """Remove users inactive for more than 10 seconds."""
     now = time.time()
     with active_users_lock:
         stale = [email for email, t in active_users.items() if now - t > INACTIVITY_LIMIT]
@@ -163,7 +163,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (camera fix + instruction screen + Luffy badge + active user count) ----------
+# ---------- Frontend (active users pill with 10s inactivity) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
