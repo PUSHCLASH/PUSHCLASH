@@ -1,24 +1,23 @@
-import sqlite3
 import os
 import time
+import psycopg2
+import psycopg2.extras
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, g
 from threading import Lock
 
 app = Flask(__name__)
-DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pushclash.db')
 
 # ---------- Active user tracking (10-second inactivity) ----------
-active_users = {}          # email -> last_active_timestamp
+active_users = {}
 active_users_lock = Lock()
-INACTIVITY_LIMIT = 10      # seconds
+INACTIVITY_LIMIT = 10
 
 def update_active_user(email):
     with active_users_lock:
         active_users[email] = time.time()
 
 def cleanup_active_users():
-    """Remove users inactive for more than 10 seconds."""
     now = time.time()
     with active_users_lock:
         stale = [email for email, t in active_users.items() if now - t > INACTIVITY_LIMIT]
@@ -30,36 +29,37 @@ def get_active_count():
     with active_users_lock:
         return len(active_users)
 
-# ---------- Database setup ----------
+# ---------- Database connection ----------
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set")
+
 def get_db():
-    db = getattr(g, '_database', None)
-    if db is None:
-        db = g._database = sqlite3.connect(DATABASE)
-        db.row_factory = sqlite3.Row
-    return db
+    if 'db' not in g:
+        g.db = psycopg2.connect(DATABASE_URL, sslmode='require')
+        g.db.cursor_factory = psycopg2.extras.DictCursor
+    return g.db
 
 @app.teardown_appcontext
-def close_connection(exception):
-    db = getattr(g, '_database', None)
+def close_db(exception):
+    db = g.pop('db', None)
     if db is not None:
         db.close()
 
 def init_db():
     with app.app_context():
         db = get_db()
-        cursor = db.execute("PRAGMA table_info(battles)")
-        columns = [row[1] for row in cursor.fetchall()] if cursor else []
-        if 'nickname' in columns or 'city' in columns or 'state' in columns:
-            db.execute('DROP TABLE IF EXISTS battles')
-            db.commit()
-        db.execute('''CREATE TABLE IF NOT EXISTS battles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            nationality TEXT NOT NULL,
-            email TEXT NOT NULL,
-            score INTEGER NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
+        cur = db.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS battles (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                nationality TEXT NOT NULL,
+                email TEXT NOT NULL,
+                score INTEGER NOT NULL,
+                timestamp TIMESTAMPTZ DEFAULT NOW()
+            )
+        ''')
         db.commit()
 
 # ---------- API Endpoints ----------
@@ -73,19 +73,27 @@ def record_battle():
     if not name or not nationality or not email or score <= 0:
         return jsonify({'error': 'Invalid data'}), 400
     db = get_db()
-    db.execute('INSERT INTO battles (name, nationality, email, score) VALUES (?, ?, ?, ?)',
-               (name, nationality, email, score))
+    cur = db.cursor()
+    cur.execute(
+        'INSERT INTO battles (name, nationality, email, score) VALUES (%s, %s, %s, %s)',
+        (name, nationality, email, score)
+    )
     db.commit()
     return jsonify({'status': 'ok'})
 
 @app.route('/api/leaderboard')
 def leaderboard():
     db = get_db()
+    cur = db.cursor()
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    rows = db.execute(
-        'SELECT name, nationality, email, score, timestamp FROM battles WHERE timestamp >= ? ORDER BY timestamp DESC',
-        (seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'),)
-    ).fetchall()
+    cur.execute('''
+        SELECT name, nationality, email, score, timestamp
+        FROM battles
+        WHERE timestamp >= %s
+        ORDER BY timestamp DESC
+    ''', (seven_days_ago,))
+    rows = cur.fetchall()
+
     best_map = {}
     for r in rows:
         email = r['email']
@@ -102,7 +110,7 @@ def leaderboard():
         date_str = ''
         if entry['date']:
             try:
-                dt = datetime.strptime(entry['date'], '%Y-%m-%d %H:%M:%S')
+                dt = entry['date']
                 date_str = dt.strftime('%b %d')
             except:
                 pass
@@ -123,21 +131,27 @@ def user_stats():
     if not email:
         return jsonify({'totalBattles': 0, 'personalBest': 0, 'rank': '-'})
     db = get_db()
-    total = db.execute('SELECT COUNT(*) as total FROM battles WHERE email=?', (email,)).fetchone()['total']
-    best = db.execute('SELECT MAX(score) as best FROM battles WHERE email=?', (email,)).fetchone()['best'] or 0
+    cur = db.cursor()
+    cur.execute('SELECT COUNT(*) FROM battles WHERE email = %s', (email,))
+    total = cur.fetchone()[0]
+    cur.execute('SELECT MAX(score) FROM battles WHERE email = %s', (email,))
+    best = cur.fetchone()[0] or 0
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    rank_row = db.execute('''
-        SELECT COUNT(DISTINCT email) + 1 as rank FROM battles
-        WHERE timestamp >= ? AND score > (SELECT COALESCE(MAX(score),0) FROM battles WHERE email=? AND timestamp >= ?)
-    ''', (seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'), email, seven_days_ago.strftime('%Y-%m-%d %H:%M:%S'))).fetchone()
-    rank = rank_row['rank'] if rank_row else '-'
+    cur.execute('''
+        SELECT COUNT(DISTINCT email) + 1 FROM battles
+        WHERE timestamp >= %s AND score > (
+            SELECT COALESCE(MAX(score), 0) FROM battles WHERE email = %s AND timestamp >= %s
+        )
+    ''', (seven_days_ago, email, seven_days_ago))
+    rank_row = cur.fetchone()
+    rank = rank_row[0] if rank_row else '-'
     return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
 
 @app.route('/api/active_users')
 def active_users_endpoint():
     return jsonify({'count': get_active_count()})
 
-# ---------- PWA Routes ----------
+# ---------- PWA Routes (unchanged) ----------
 @app.route('/manifest.json')
 def manifest():
     return jsonify({
@@ -163,7 +177,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (active users pill with 10s inactivity) ----------
+# ---------- Frontend (unchanged from last working version) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -194,7 +208,6 @@ FRONTEND_HTML = """
   .score-date{font-size:.75rem;color:#888;margin-left:6px}
   .result-msg{text-align:center;font-size:1.3rem;margin:12px 0;font-style:italic;color:#f0f}
   .small{font-size:.85rem;color:#aaa}.share-btn{background:#0ff;color:black}
-
   video,canvas{width:100%;border-radius:14px;background:#000}
   #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden;background:#000;display:block}
   #aiCameraUI video{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2}
