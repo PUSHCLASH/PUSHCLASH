@@ -2,7 +2,7 @@ import os
 import time
 import psycopg2
 import psycopg2.extras
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, g
 from threading import Lock
 
@@ -63,6 +63,18 @@ def init_db():
         db.commit()
 
 # ---------- API Endpoints ----------
+@app.route('/api/check-email', methods=['POST'])
+def check_email():
+    data = request.get_json()
+    email = data.get('email', '').strip()
+    if not email:
+        return jsonify({'exists': False})
+    db = get_db()
+    cur = db.cursor()
+    cur.execute('SELECT COUNT(*) FROM battles WHERE email = %s', (email,))
+    exists = cur.fetchone()[0] > 0
+    return jsonify({'exists': exists})
+
 @app.route('/api/battle', methods=['POST'])
 def record_battle():
     data = request.get_json()
@@ -85,7 +97,7 @@ def record_battle():
 def leaderboard():
     db = get_db()
     cur = db.cursor()
-    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
     cur.execute('''
         SELECT name, nationality, email, score, timestamp
         FROM battles
@@ -136,7 +148,7 @@ def user_stats():
     total = cur.fetchone()[0]
     cur.execute('SELECT MAX(score) FROM battles WHERE email = %s', (email,))
     best = cur.fetchone()[0] or 0
-    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
     cur.execute('''
         SELECT COUNT(DISTINCT email) + 1 FROM battles
         WHERE timestamp >= %s AND score > (
@@ -177,7 +189,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (unchanged from last working version) ----------
+# ---------- Frontend (unchanged, except saveProfile now checks email duplicate) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -392,14 +404,27 @@ FRONTEND_HTML = """
     speechSynthesis.speak(msg);
   }
 
-  // -------------------- USER FLOW --------------------
-  function saveProfile(){
+  // -------------------- USER FLOW (with duplicate email check) --------------------
+  async function saveProfile(){
     const n = document.getElementById('nameInput').value.trim();
     const nat = document.getElementById('nationalityInput').value.trim();
     const em = document.getElementById('emailInput').value.trim();
     const err = document.getElementById('setupError');
     if(!n || !nat || !em){ err.textContent = 'All fields are required!'; return; }
     if(!em.includes('@') || !em.includes('.')){ err.textContent = 'Please enter a valid email'; return; }
+
+    // Check if email already exists in the database
+    const checkRes = await fetch('/api/check-email', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email: em})
+    });
+    const checkData = await checkRes.json();
+    if(checkData.exists){
+      err.textContent = 'This email is already registered. Please use a different email or contact the CEO to recover your account.';
+      return;
+    }
+
     err.textContent = '';
     currentUser = {name: n, nationality: nat, email: em};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
