@@ -141,13 +141,15 @@ def user_stats():
     if email:
         update_active_user(email)
     if not email:
-        return jsonify({'totalBattles': 0, 'personalBest': 0, 'rank': '-'})
+        return jsonify({'totalBattles': 0, 'personalBest': 0, 'rank': '-', 'totalPushups': 0, 'recentBattles': []})
     db = get_db()
     cur = db.cursor()
     cur.execute('SELECT COUNT(*) FROM battles WHERE email = %s', (email,))
     total = cur.fetchone()[0]
     cur.execute('SELECT MAX(score) FROM battles WHERE email = %s', (email,))
     best = cur.fetchone()[0] or 0
+    cur.execute('SELECT COALESCE(SUM(score), 0) FROM battles WHERE email = %s', (email,))
+    total_pushups = cur.fetchone()[0]
     seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
     cur.execute('''
         SELECT COUNT(DISTINCT email) + 1 FROM battles
@@ -157,7 +159,10 @@ def user_stats():
     ''', (seven_days_ago, email, seven_days_ago))
     rank_row = cur.fetchone()
     rank = rank_row[0] if rank_row else '-'
-    return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank})
+    # Last 10 battles
+    cur.execute('SELECT score, timestamp FROM battles WHERE email = %s ORDER BY timestamp DESC LIMIT 10', (email,))
+    recent = [{'score': r['score'], 'date': r['timestamp'].strftime('%b %d %H:%M')} for r in cur.fetchall()]
+    return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank, 'totalPushups': total_pushups, 'recentBattles': recent})
 
 @app.route('/api/active_users')
 def active_users_endpoint():
@@ -189,7 +194,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (unchanged, except saveProfile now checks email duplicate) ----------
+# ---------- Frontend (Stats page + AI Assistant) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -257,18 +262,32 @@ FRONTEND_HTML = """
   .checkbox-row{display:flex;align-items:center;gap:12px;margin:20px 0;justify-content:center}
   .checkbox-row input{width:20px;height:20px;accent-color:#ff4500}
   .checkbox-row label{font-size:0.9rem;color:#ccc}
+
+  /* Stats Screen */
+  .stats-box{background:rgba(0,0,0,0.7);border-radius:16px;padding:16px;margin:10px 0}
+  .stats-row{display:flex;gap:12px;margin:10px 0}
+  .stats-card{flex:1;background:#1a1a1a;border-radius:12px;padding:12px;text-align:center}
+  .stats-card .big-num{font-size:2rem;font-weight:bold;color:#0ff}
+  .stats-card .label{font-size:0.75rem;color:#aaa}
+  .recent-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #333}
+
+  /* AI Assistant */
+  .ai-assistant{position:fixed;bottom:20px;right:20px;z-index:15000;background:linear-gradient(135deg,#ff4500,#ff00ff);color:#fff;padding:10px 16px;border-radius:20px;font-size:0.85rem;max-width:250px;box-shadow:0 0 20px rgba(255,0,255,0.4);cursor:pointer;animation:aiPulse 2s infinite}
+  @keyframes aiPulse{0%{box-shadow:0 0 10px rgba(255,0,255,0.4)}50%{box-shadow:0 0 25px rgba(255,0,255,0.8)}100%{box-shadow:0 0 10px rgba(255,0,255,0.4)}}
+  .ai-msg{display:block;line-height:1.4}
+  .ai-close{position:absolute;top:2px;right:8px;font-size:0.7rem;color:#ccc;cursor:pointer}
 </style>
 </head>
 <body>
 
-<!-- ACTIVE USERS PILL (top-left) -->
+<!-- ACTIVE USERS PILL -->
 <div class="active-users-pill" id="activeUsersPill">
   <span class="user-icon">👥</span>
   <span class="count" id="activeUserCount">0</span>
   <span style="font-size:0.8rem;color:#aaa">online</span>
 </div>
 
-<!-- LUFFY GEAR 5 BADGE -->
+<!-- LUFFY BADGE -->
 <div class="luffy-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
   <img class="luffy-img" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
   <span class="ceo-label">CEO of App</span>
@@ -286,6 +305,12 @@ FRONTEND_HTML = """
     <div style="color:#aaa;font-size:0.7rem">Tap to call (coming soon)</div>
     <button class="close-btn" onclick="document.getElementById('ceoModal').classList.remove('active')">Close</button>
   </div>
+</div>
+
+<!-- AI Assistant -->
+<div class="ai-assistant" id="aiAssistant" onclick="speakAIMessage()">
+  <span class="ai-close" onclick="event.stopPropagation(); document.getElementById('aiAssistant').style.display='none'">✕</span>
+  <span class="ai-msg" id="aiMessage">💬 Hey warrior! Ready to crush some push-ups?</span>
 </div>
 
 <div class="app-container" id="app">
@@ -330,8 +355,31 @@ FRONTEND_HTML = """
     </div>
     <button class="btn-primary" onclick="startChallenge('ai')">🤖 START AI BATTLE</button>
     <button class="btn-secondary" onclick="showLeaderboard()">🏆 Weekly Leaderboard</button>
+    <button class="btn-secondary" onclick="showStats()">📊 MY STATS</button>
     <button class="btn-secondary" onclick="resetProfile()">🔄 Leave Arena</button>
     <div class="success-msg" id="saveConfirmation" style="display:none">✅ Score saved to global arena!</div>
+  </div>
+
+  <!-- Stats Screen -->
+  <div id="statsScreen" class="screen">
+    <h1>📊 MY STATS</h1>
+    <div class="stats-box">
+      <div class="stats-row">
+        <div class="stats-card"><div class="big-num" id="statTotalPushups">0</div><div class="label">Total Push‑ups</div></div>
+        <div class="stats-card"><div class="big-num" id="statBest">0</div><div class="label">Personal Best</div></div>
+      </div>
+      <div class="stats-row">
+        <div class="stats-card"><div class="big-num" id="statBattles">0</div><div class="label">Battles Fought</div></div>
+        <div class="stats-card"><div class="big-num" id="statRank">-</div><div class="label">Weekly Rank</div></div>
+      </div>
+    </div>
+    <h3 style="margin-top:16px">📜 Recent Battles</h3>
+    <div id="recentBattlesList" style="max-height:200px;overflow-y:auto"></div>
+    <div class="stats-box" style="margin-top:16px">
+      <p style="color:#fa0;font-weight:bold">💡 Practice Tip</p>
+      <p id="practiceTip" style="font-size:0.9rem;color:#ccc">Complete your first battle to see personalised tips!</p>
+    </div>
+    <button class="btn-secondary" onclick="showScreen('dashboardScreen')">← Back to Arena</button>
   </div>
 
   <!-- Challenge Screen -->
@@ -363,7 +411,7 @@ FRONTEND_HTML = """
     <h1>WEEKLY RANKINGS</h1>
     <p class="small" style="text-align:center">Top 10 of the last 7 days</p>
     <div id="leaderboardList"></div>
-    <button class="btn-secondary" onclick="goToDashboard()" style="margin-top:16px">← Back to Arena</button>
+    <button class="btn-secondary" onclick="showScreen('dashboardScreen')" style="margin-top:16px">← Back to Arena</button>
   </div>
 </div>
 
@@ -386,6 +434,30 @@ FRONTEND_HTML = """
   setInterval(refreshActiveCount, 10000);
   window.addEventListener('load', refreshActiveCount);
 
+  // ---------- AI Assistant ----------
+  const aiMessages = [
+    "💬 Hey warrior! Ready to crush some push‑ups today? Check your stats!",
+    "💬 Tip: Keep your back straight and go all the way down for max gains!",
+    "💬 Consistency beats intensity. Even 10 push‑ups a day changes your body!",
+    "💬 Did you know? The world record is 10,507 push‑ups in one go. You got this!",
+    "💬 Hydrate before your battle, champ. Water = power!",
+    "💬 Your muscles grow when you rest. Don't forget to take breaks!"
+  ];
+  function setAIMessage(msg) {
+    document.getElementById('aiMessage').textContent = msg;
+  }
+  function speakAIMessage() {
+    const msg = new SpeechSynthesisUtterance(document.getElementById('aiMessage').textContent);
+    speechSynthesis.speak(msg);
+  }
+  // Rotate AI messages every 20 seconds
+  setInterval(() => {
+    const randomMsg = aiMessages[Math.floor(Math.random() * aiMessages.length)];
+    setAIMessage(randomMsg);
+  }, 20000);
+  // Initial custom message
+  setAIMessage("💬 Yo warrior! I'm your AI coach. Tap me anytime for tips. Let's get swole! 🏋️");
+
   // -------------------- VOICE HELPERS --------------------
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
@@ -394,6 +466,7 @@ FRONTEND_HTML = """
     const femaleVoice = voices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha') || v.name.toLowerCase().includes('google uk female') || v.name.toLowerCase().includes('microsoft zira'));
     if (femaleVoice) msg.voice = femaleVoice;
     speechSynthesis.speak(msg);
+    setAIMessage("💬 Welcome to the arena, warrior! I'll be your AI coach. Tap me for motivation!");
   }
   function speakChampion() {
     const msg = new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger.");
@@ -404,7 +477,7 @@ FRONTEND_HTML = """
     speechSynthesis.speak(msg);
   }
 
-  // -------------------- USER FLOW (with duplicate email check) --------------------
+  // -------------------- USER FLOW --------------------
   async function saveProfile(){
     const n = document.getElementById('nameInput').value.trim();
     const nat = document.getElementById('nationalityInput').value.trim();
@@ -412,19 +485,9 @@ FRONTEND_HTML = """
     const err = document.getElementById('setupError');
     if(!n || !nat || !em){ err.textContent = 'All fields are required!'; return; }
     if(!em.includes('@') || !em.includes('.')){ err.textContent = 'Please enter a valid email'; return; }
-
-    // Check if email already exists in the database
-    const checkRes = await fetch('/api/check-email', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({email: em})
-    });
+    const checkRes = await fetch('/api/check-email', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: em})});
     const checkData = await checkRes.json();
-    if(checkData.exists){
-      err.textContent = 'This email is already registered. Please use a different email or contact the CEO to recover your account.';
-      return;
-    }
-
+    if(checkData.exists){ err.textContent = 'This email is already registered. Please use a different email or contact the CEO to recover your account.'; return; }
     err.textContent = '';
     currentUser = {name: n, nationality: nat, email: em};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
@@ -438,7 +501,7 @@ FRONTEND_HTML = """
 
   function resetProfile(){ localStorage.removeItem('pushclash_user'); currentUser=null; showScreen('setupScreen'); }
   function showScreen(id){ document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active')); document.getElementById(id).classList.add('active'); if(id!=='dashboardScreen') document.getElementById('saveConfirmation').style.display='none'; }
-  function goToDashboard(){ if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; } loadStats(); showScreen('dashboardScreen'); }
+  function goToDashboard(){ if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; } loadStats(); showScreen('dashboardScreen'); setAIMessage("💬 Great battle! Check your stats to see your progress. Consistency is key!"); }
 
   async function loadStats(){
     if(!currentUser) return;
@@ -448,7 +511,33 @@ FRONTEND_HTML = """
     const data = await res.json();
     document.getElementById('personalBest').textContent = data.personalBest;
     document.getElementById('totalBattles').textContent = data.totalBattles;
+    // Store for stats page
+    localStorage.setItem('pushclash_stats', JSON.stringify(data));
     refreshActiveCount();
+  }
+
+  // -------------------- STATS PAGE --------------------
+  async function showStats(){
+    if(!currentUser) return;
+    const res = await fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
+    const data = await res.json();
+    document.getElementById('statTotalPushups').textContent = data.totalPushups;
+    document.getElementById('statBest').textContent = data.personalBest;
+    document.getElementById('statBattles').textContent = data.totalBattles;
+    document.getElementById('statRank').textContent = data.rank;
+    const container = document.getElementById('recentBattlesList');
+    if(!data.recentBattles.length){ container.innerHTML = '<p style="color:#aaa">No battles yet. Start your first one!</p>'; }
+    else { container.innerHTML = data.recentBattles.map(b=>`<div class="recent-item"><span>🔥 Score: ${b.score}</span><span class="small">${b.date}</span></div>`).join(''); }
+    // Practice tip
+    const best = data.personalBest;
+    let tip = "Complete your first battle to see personalised tips!";
+    if(best > 0 && best <= 10) tip = "Great start! Aim for 15 reps in your next battle. Slow down and focus on form.";
+    else if(best > 10 && best <= 25) tip = "Nice work! You're building real strength. Try doing push‑ups every other day for recovery.";
+    else if(best > 25 && best <= 40) tip = "You're a beast! Add explosive push‑ups to your routine to boost your max score.";
+    else if(best > 40) tip = "Elite warrior! Focus on breathing—exhale on the way up, inhale on the way down.";
+    document.getElementById('practiceTip').textContent = tip;
+    showScreen('statsScreen');
+    setAIMessage("💬 Let's review your stats! I can see you're improving. Keep pushing your limits!");
   }
 
   // -------------------- CHALLENGE START --------------------
@@ -468,6 +557,7 @@ FRONTEND_HTML = """
         setTimeout(()=>{ clearInterval(countdownInterval); document.getElementById('countdownDisplay').style.display='none'; startActiveChallenge(); }, 400);
       } else { document.getElementById('countdownDisplay').textContent = count; }
     }, 800);
+    setAIMessage("💪 Let's go! Give it everything you've got. I believe in you!");
   }
 
   async function startActiveChallenge(){
@@ -475,69 +565,35 @@ FRONTEND_HTML = """
     document.getElementById('challengeActiveUI').style.display='block';
     document.getElementById('timerDisplay').textContent = timeLeft;
     document.getElementById('repCounter').textContent = '0';
-
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
-
     await startAICamera();
-
-    challengeInterval = setInterval(()=>{
-      timeLeft--;
-      document.getElementById('timerDisplay').textContent = timeLeft;
-      if(timeLeft<=0){ clearInterval(challengeInterval); endBattle(); }
-    }, 1000);
+    challengeInterval = setInterval(()=>{ timeLeft--; document.getElementById('timerDisplay').textContent = timeLeft; if(timeLeft<=0){ clearInterval(challengeInterval); endBattle(); } }, 1000);
     if(currentUser) fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
   }
 
-  // -------------------- AI CAMERA (NO RESOLUTION CONSTRAINTS) --------------------
+  // -------------------- AI CAMERA --------------------
   let angleBuffer = [], lastRepTime = 0, aiState = 'up';
-
   async function startAICamera(){
-    const video = document.getElementById('webcam');
-    const canvas = document.getElementById('poseCanvas');
-    const ctx = canvas.getContext('2d');
-    const debugMsg = document.getElementById('debugMsg');
-
+    const video = document.getElementById('webcam'), canvas = document.getElementById('poseCanvas'), ctx = canvas.getContext('2d'), debugMsg = document.getElementById('debugMsg');
     try {
       aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      video.srcObject = aiStream;
-      await video.play();
+      video.srcObject = aiStream; await video.play();
       debugMsg.textContent = '✅ AI ready – show yourself!';
-    } catch(e) {
-      debugMsg.textContent = '❌ Camera access denied! Please allow camera in settings.';
-      return;
-    }
-
-    video.addEventListener('loadedmetadata', () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    });
-
-    try {
-      const cfg = { modelType: 'SinglePose.Lightning' };
-      aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, cfg);
-    } catch(e) {
-      debugMsg.textContent = '❌ AI model failed to load. Check your internet.';
-      return;
-    }
-
+    } catch(e) { debugMsg.textContent = '❌ Camera access denied!'; return; }
+    video.addEventListener('loadedmetadata', ()=>{ canvas.width = video.videoWidth; canvas.height = video.videoHeight; });
+    try { aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {modelType: 'SinglePose.Lightning'}); } catch(e) { debugMsg.textContent = '❌ AI model failed.'; return; }
     angleBuffer = []; lastRepTime = 0; aiState = 'up';
     requestAnimationFrame(detectPose);
   }
 
-  function movingAverage(arr, N){
-    const recent = arr.slice(-N);
-    if(recent.length===0) return null;
-    return recent.reduce((a,b)=>a+b,0)/recent.length;
-  }
-
+  function movingAverage(arr, N){ const recent = arr.slice(-N); if(recent.length===0) return null; return recent.reduce((a,b)=>a+b,0)/recent.length; }
   async function detectPose(){
     if(timeLeft<=0 || !aiDetector || !aiStream) return;
     const video = document.getElementById('webcam'), canvas = document.getElementById('poseCanvas'), ctx = canvas.getContext('2d'), overlay = document.getElementById('angleOverlay'), debugMsg = document.getElementById('debugMsg');
     if(video.readyState < 2){ requestAnimationFrame(detectPose); return; }
     const poses = await aiDetector.estimatePoses(video, {flipHorizontal: false});
     ctx.clearRect(0,0,canvas.width,canvas.height);
-
     if(poses.length > 0){
       const kp = poses[0].keypoints; drawSkeleton(ctx, kp);
       const ls = kp[5], rs = kp[6], le = kp[7], lw = kp[9], re = kp[8], rw = kp[10];
@@ -546,53 +602,24 @@ FRONTEND_HTML = """
         angleBuffer.push(raw); if(angleBuffer.length>5) angleBuffer.shift();
         const sa = movingAverage(angleBuffer,5);
         if(sa===null){ requestAnimationFrame(detectPose); return; }
-
-        overlay.textContent = Math.round(sa) + '°';
-        overlay.style.display = 'block';
+        overlay.textContent = Math.round(sa) + '°'; overlay.style.display='block';
         debugMsg.textContent = '🟢 Active – ' + Math.round(sa) + '°';
-
         const now = Date.now();
-        if(aiState==='up' && sa < 90){
-          aiState = 'down';
-        } else if(aiState==='down' && sa > 160){
+        if(aiState==='up' && sa < 90){ aiState = 'down'; }
+        else if(aiState==='down' && sa > 160){
           if(now - lastRepTime > 500){
-            repCount++;
-            document.getElementById('repCounter').textContent = repCount;
-            lastRepTime = now;
-            const flash = document.getElementById('repFlash');
-            flash.style.display = 'block';
-            setTimeout(()=>{ flash.style.display='none'; }, 800);
+            repCount++; document.getElementById('repCounter').textContent = repCount; lastRepTime = now;
+            const flash = document.getElementById('repFlash'); flash.style.display='block'; setTimeout(()=>{ flash.style.display='none'; }, 800);
           }
           aiState = 'up';
         }
-      } else {
-        overlay.textContent = '?'; overlay.style.display='block';
-        debugMsg.textContent = '⚠️ Not all keypoints visible – adjust camera';
-      }
-    } else {
-      overlay.textContent = '?'; overlay.style.display='block';
-      debugMsg.textContent = '🔍 Searching for pose...';
-    }
+      } else { overlay.textContent = '?'; overlay.style.display='block'; debugMsg.textContent = '⚠️ Not all keypoints visible'; }
+    } else { overlay.textContent = '?'; overlay.style.display='block'; debugMsg.textContent = '🔍 Searching for pose...'; }
     requestAnimationFrame(detectPose);
   }
 
-  function calculateAngle(a,b,c){
-    const radians = Math.atan2(c.y-b.y, c.x-b.x) - Math.atan2(a.y-b.y, a.x-b.x);
-    let angle = Math.abs(radians * 180.0 / Math.PI);
-    if(angle > 180.0) angle = 360 - angle;
-    return angle;
-  }
-
-  function drawSkeleton(ctx, kp){
-    const adj = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
-    ctx.strokeStyle = '#0ff'; ctx.lineWidth = 2;
-    for(const [p1,p2] of adj){
-      if(kp[p1].score > 0.3 && kp[p2].score > 0.3){
-        ctx.beginPath(); ctx.moveTo(kp[p1].x, kp[p1].y); ctx.lineTo(kp[p2].x, kp[p2].y); ctx.stroke();
-      }
-    }
-    for(const p of kp){ if(p.score > 0.3){ ctx.fillStyle='#f0f'; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,2*Math.PI); ctx.fill(); } }
-  }
+  function calculateAngle(a,b,c){ const radians = Math.atan2(c.y-b.y, c.x-b.x) - Math.atan2(a.y-b.y, a.x-b.x); let angle = Math.abs(radians * 180.0 / Math.PI); if(angle > 180.0) angle = 360 - angle; return angle; }
+  function drawSkeleton(ctx, kp){ const adj = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet); ctx.strokeStyle = '#0ff'; ctx.lineWidth = 2; for(const [p1,p2] of adj){ if(kp[p1].score > 0.3 && kp[p2].score > 0.3){ ctx.beginPath(); ctx.moveTo(kp[p1].x, kp[p1].y); ctx.lineTo(kp[p2].x, kp[p2].y); ctx.stroke(); } } for(const p of kp){ if(p.score > 0.3){ ctx.fillStyle='#f0f'; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,2*Math.PI); ctx.fill(); } } }
 
   // -------------------- END BATTLE --------------------
   async function endBattle(){
@@ -604,6 +631,14 @@ FRONTEND_HTML = """
     const champ = document.getElementById('championText'); champ.style.display='block'; speakChampion();
     await fetch('/api/battle', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:currentUser.name, nationality:currentUser.nationality, email:currentUser.email, score:repCount})});
     setTimeout(()=>{ champ.style.display='none'; }, 5000);
+    // AI analyses score
+    let aiMsg = `🔥 You did ${repCount} push‑ups! `;
+    if(repCount === 0) aiMsg += "Don't give up, warrior. Even the strongest started from zero.";
+    else if(repCount <= 10) aiMsg += "Nice warm‑up! Aim for 15 next time. Slow, controlled reps win.";
+    else if(repCount <= 25) aiMsg += "Solid effort! Your form is improving. Keep that back straight!";
+    else if(repCount <= 40) aiMsg += "Beast mode! You're in the top tier. How about 50 next battle?";
+    else aiMsg += "ELITE! You're a legend. The world better watch out!";
+    setAIMessage(aiMsg);
   }
 
   function shareScore(){ navigator.clipboard.writeText(`I just did ${repCount} push-ups in PushClash! Can you beat me? 🔥 ${BASE}`).then(()=>alert('Link copied!')); }
@@ -612,11 +647,7 @@ FRONTEND_HTML = """
     showScreen('leaderboardScreen');
     const res = await fetch('/api/leaderboard'), data = await res.json(), container = document.getElementById('leaderboardList');
     if(!data.length){ container.innerHTML = '<p style="text-align:center;color:#aaa">No battles in the last 7 days. Be the first!</p>'; return; }
-    container.innerHTML = data.map((b,i)=>{
-      const emojis = ['🥇','🥈','🥉'], rankDisp = i<3 ? emojis[i] : `#${i+1}`;
-      const dateStr = b.date ? ` <span class="score-date">${b.date}</span>` : '';
-      return `<div class="leaderboard-item"><span class="rank">${rankDisp}</span><span>${b.name}</span><span class="small">${b.nationality}</span><span class="score">${b.score}${dateStr}</span></div>`;
-    }).join('');
+    container.innerHTML = data.map((b,i)=>{ const emojis = ['🥇','🥈','🥉'], rankDisp = i<3 ? emojis[i] : `#${i+1}`; const dateStr = b.date ? ` <span class="score-date">${b.date}</span>` : ''; return `<div class="leaderboard-item"><span class="rank">${rankDisp}</span><span>${b.name}</span><span class="small">${b.nationality}</span><span class="score">${b.score}${dateStr}</span></div>`; }).join('');
   }
 
   // Init
