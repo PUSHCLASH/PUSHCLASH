@@ -105,7 +105,6 @@ def leaderboard():
         ORDER BY timestamp DESC
     ''', (seven_days_ago,))
     rows = cur.fetchall()
-
     best_map = {}
     for r in rows:
         email = r['email']
@@ -159,26 +158,66 @@ def user_stats():
     ''', (seven_days_ago, email, seven_days_ago))
     rank_row = cur.fetchone()
     rank = rank_row[0] if rank_row else '-'
-    # Last 10 battles
     cur.execute('SELECT score, timestamp FROM battles WHERE email = %s ORDER BY timestamp DESC LIMIT 10', (email,))
     recent = [{'score': r['score'], 'date': r['timestamp'].strftime('%b %d %H:%M')} for r in cur.fetchall()]
-    return jsonify({'totalBattles': total, 'personalBest': best, 'rank': rank, 'totalPushups': total_pushups, 'recentBattles': recent})
+    return jsonify({
+        'totalBattles': total,
+        'personalBest': best,
+        'rank': rank,
+        'totalPushups': total_pushups,
+        'recentBattles': recent
+    })
+
+@app.route('/api/streak')
+def streak():
+    email = request.args.get('email', '').strip()
+    if not email:
+        return jsonify({'streak': 0, 'lastDate': None})
+    db = get_db()
+    cur = db.cursor()
+    cur.execute('SELECT DISTINCT DATE(timestamp) as day FROM battles WHERE email = %s ORDER BY day DESC LIMIT 60', (email,))
+    days = [r['day'] for r in cur.fetchall()]
+    if not days:
+        return jsonify({'streak': 0, 'lastDate': None})
+    today = datetime.now(timezone.utc).date()
+    yesterday = today - timedelta(days=1)
+    if days[0] not in (today, yesterday):
+        return jsonify({'streak': 0, 'lastDate': str(days[0])})
+    streak = 1
+    for i in range(1, len(days)):
+        if (days[i-1] - days[i]).days == 1:
+            streak += 1
+        else:
+            break
+    return jsonify({'streak': streak, 'lastDate': str(days[0])})
+
+@app.route('/api/target')
+def daily_target():
+    email = request.args.get('email', '').strip()
+    if not email:
+        return jsonify({'target': 10, 'todayDone': 0})
+    db = get_db()
+    cur = db.cursor()
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    cur.execute('SELECT COALESCE(SUM(score), 0) FROM battles WHERE email = %s AND timestamp >= %s', (email, today_start))
+    today_done = cur.fetchone()[0]
+    # Average of last 7 days
+    seven_days_ago = today_start - timedelta(days=7)
+    cur.execute('SELECT COALESCE(AVG(daily_total), 0) FROM (SELECT SUM(score) as daily_total FROM battles WHERE email = %s AND timestamp >= %s GROUP BY DATE(timestamp)) sub', (email, seven_days_ago))
+    avg = cur.fetchone()[0]
+    target = max(10, int(avg * 1.2) + 5)  # progressive overload
+    return jsonify({'target': target, 'todayDone': today_done})
 
 @app.route('/api/active_users')
 def active_users_endpoint():
     return jsonify({'count': get_active_count()})
 
-# ---------- PWA Routes (unchanged) ----------
+# ---------- PWA Routes ----------
 @app.route('/manifest.json')
 def manifest():
     return jsonify({
-        "name": "PushClash",
-        "short_name": "PushClash",
-        "start_url": "/",
-        "scope": "/",
-        "display": "standalone",
-        "background_color": "#0a0a0a",
-        "theme_color": "#ff00ff",
+        "name": "PushClash", "short_name": "PushClash", "start_url": "/", "scope": "/",
+        "display": "standalone", "background_color": "#0a0a0a", "theme_color": "#ff00ff",
         "orientation": "portrait-primary",
         "icons": [
             {"src": "https://cdn-icons-png.flaticon.com/128/2548/2548538.png", "sizes": "128x128", "type": "image/png"},
@@ -194,7 +233,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Stats page + AI Assistant) ----------
+# ---------- Frontend (Ultimate Immersion AI Assistant) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -258,7 +297,6 @@ FRONTEND_HTML = """
   /* Instruction screen */
   .instruction-box{background:rgba(0,0,0,0.8);border-radius:20px;padding:20px;margin:20px 0}
   .instruction-box p{font-size:1rem;line-height:1.8;margin:8px 0;color:#ddd}
-  .instruction-box .emoji{font-size:1.3rem}
   .checkbox-row{display:flex;align-items:center;gap:12px;margin:20px 0;justify-content:center}
   .checkbox-row input{width:20px;height:20px;accent-color:#ff4500}
   .checkbox-row label{font-size:0.9rem;color:#ccc}
@@ -270,12 +308,12 @@ FRONTEND_HTML = """
   .stats-card .big-num{font-size:2rem;font-weight:bold;color:#0ff}
   .stats-card .label{font-size:0.75rem;color:#aaa}
   .recent-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #333}
+  .plan-item{display:flex;justify-content:space-between;padding:6px 0;color:#ccc}
 
   /* AI Assistant */
-  .ai-assistant{position:fixed;bottom:20px;right:20px;z-index:15000;background:linear-gradient(135deg,#ff4500,#ff00ff);color:#fff;padding:10px 16px;border-radius:20px;font-size:0.85rem;max-width:250px;box-shadow:0 0 20px rgba(255,0,255,0.4);cursor:pointer;animation:aiPulse 2s infinite}
-  @keyframes aiPulse{0%{box-shadow:0 0 10px rgba(255,0,255,0.4)}50%{box-shadow:0 0 25px rgba(255,0,255,0.8)}100%{box-shadow:0 0 10px rgba(255,0,255,0.4)}}
+  .ai-assistant{position:fixed;bottom:20px;right:20px;z-index:15000;background:linear-gradient(135deg,#ff4500,#ff00ff);color:#fff;padding:10px 16px;border-radius:20px;font-size:0.85rem;max-width:250px;box-shadow:0 0 20px rgba(255,0,255,0.4);cursor:pointer}
   .ai-msg{display:block;line-height:1.4}
-  .ai-close{position:absolute;top:2px;right:8px;font-size:0.7rem;color:#ccc;cursor:pointer}
+  .ai-mute{position:absolute;top:-8px;right:-8px;background:#fff;color:#000;width:24px;height:24px;border-radius:50%;font-size:0.8rem;border:none;cursor:pointer}
 </style>
 </head>
 <body>
@@ -307,10 +345,10 @@ FRONTEND_HTML = """
   </div>
 </div>
 
-<!-- AI Assistant -->
+<!-- AI Assistant (Ultimate Immersion) -->
 <div class="ai-assistant" id="aiAssistant" onclick="speakAIMessage()">
-  <span class="ai-close" onclick="event.stopPropagation(); document.getElementById('aiAssistant').style.display='none'">✕</span>
-  <span class="ai-msg" id="aiMessage">💬 Hey warrior! Ready to crush some push-ups?</span>
+  <button class="ai-mute" id="aiMuteBtn" onclick="event.stopPropagation(); toggleMute()">🔊</button>
+  <span class="ai-msg" id="aiMessage">💬 Loading your coach...</span>
 </div>
 
 <div class="app-container" id="app">
@@ -353,6 +391,10 @@ FRONTEND_HTML = """
       <div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#0ff" id="personalBest">0</div><div class="small">Personal Best</div></div>
       <div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#f0f" id="totalBattles">0</div><div class="small">Total Battles</div></div>
     </div>
+    <div style="display:flex;gap:12px;margin:10px 0;color:#ff0">
+      <span id="streakDisplay" style="font-size:0.9rem">🔥 Streak: 0 days</span>
+      <span id="targetDisplay" style="font-size:0.9rem">🎯 Daily target: 10</span>
+    </div>
     <button class="btn-primary" onclick="startChallenge('ai')">🤖 START AI BATTLE</button>
     <button class="btn-secondary" onclick="showLeaderboard()">🏆 Weekly Leaderboard</button>
     <button class="btn-secondary" onclick="showStats()">📊 MY STATS</button>
@@ -360,9 +402,9 @@ FRONTEND_HTML = """
     <div class="success-msg" id="saveConfirmation" style="display:none">✅ Score saved to global arena!</div>
   </div>
 
-  <!-- Stats Screen -->
+  <!-- Stats Screen (with weekly plan) -->
   <div id="statsScreen" class="screen">
-    <h1>📊 MY STATS</h1>
+    <h1>📊 MY STATS & PLAN</h1>
     <div class="stats-box">
       <div class="stats-row">
         <div class="stats-card"><div class="big-num" id="statTotalPushups">0</div><div class="label">Total Push‑ups</div></div>
@@ -373,12 +415,18 @@ FRONTEND_HTML = """
         <div class="stats-card"><div class="big-num" id="statRank">-</div><div class="label">Weekly Rank</div></div>
       </div>
     </div>
-    <h3 style="margin-top:16px">📜 Recent Battles</h3>
-    <div id="recentBattlesList" style="max-height:200px;overflow-y:auto"></div>
-    <div class="stats-box" style="margin-top:16px">
-      <p style="color:#fa0;font-weight:bold">💡 Practice Tip</p>
-      <p id="practiceTip" style="font-size:0.9rem;color:#ccc">Complete your first battle to see personalised tips!</p>
+    <h3>📅 Weekly Training Plan</h3>
+    <div id="weeklyPlan" class="stats-box" style="font-size:0.85rem">
+      <div class="plan-item"><span>Mon</span><span>30 push‑ups</span></div>
+      <div class="plan-item"><span>Tue</span><span>35 push‑ups</span></div>
+      <div class="plan-item"><span>Wed</span><span>REST</span></div>
+      <div class="plan-item"><span>Thu</span><span>40 push‑ups</span></div>
+      <div class="plan-item"><span>Fri</span><span>35 push‑ups</span></div>
+      <div class="plan-item"><span>Sat</span><span>50 push‑ups (challenge)</span></div>
+      <div class="plan-item"><span>Sun</span><span>Active recovery</span></div>
     </div>
+    <h3>📜 Recent Battles</h3>
+    <div id="recentBattlesList" style="max-height:200px;overflow-y:auto"></div>
     <button class="btn-secondary" onclick="showScreen('dashboardScreen')">← Back to Arena</button>
   </div>
 
@@ -420,45 +468,75 @@ FRONTEND_HTML = """
 <script>
   // -------------------- GLOBALS --------------------
   let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval, countdownInterval, challengeMode = 'ai', aiDetector = null, aiStream = null;
+  let muteAI = false;
+  let idleTimer = null;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
-  // ---------- Active user count updater ----------
+  // ---------- Active user count ----------
   async function refreshActiveCount() {
-    try {
-      const res = await fetch('/api/active_users');
-      const data = await res.json();
-      document.getElementById('activeUserCount').textContent = data.count;
-    } catch(e) {}
+    try { const res = await fetch('/api/active_users'); const data = await res.json(); document.getElementById('activeUserCount').textContent = data.count; } catch(e) {}
   }
   setInterval(refreshActiveCount, 10000);
   window.addEventListener('load', refreshActiveCount);
 
-  // ---------- AI Assistant ----------
-  const aiMessages = [
-    "💬 Hey warrior! Ready to crush some push‑ups today? Check your stats!",
-    "💬 Tip: Keep your back straight and go all the way down for max gains!",
-    "💬 Consistency beats intensity. Even 10 push‑ups a day changes your body!",
-    "💬 Did you know? The world record is 10,507 push‑ups in one go. You got this!",
-    "💬 Hydrate before your battle, champ. Water = power!",
-    "💬 Your muscles grow when you rest. Don't forget to take breaks!"
-  ];
-  function setAIMessage(msg) {
-    document.getElementById('aiMessage').textContent = msg;
+  // ---------- AI Assistant voice helpers ----------
+  function speak(msg) {
+    if (muteAI) return;
+    const utter = new SpeechSynthesisUtterance(msg);
+    utter.lang = 'en-US';
+    utter.rate = 0.95;
+    speechSynthesis.speak(utter);
   }
-  function speakAIMessage() {
-    const msg = new SpeechSynthesisUtterance(document.getElementById('aiMessage').textContent);
-    speechSynthesis.speak(msg);
+  function toggleMute() {
+    muteAI = !muteAI;
+    const btn = document.getElementById('aiMuteBtn');
+    btn.textContent = muteAI ? '🔇' : '🔊';
   }
-  // Rotate AI messages every 20 seconds
-  setInterval(() => {
-    const randomMsg = aiMessages[Math.floor(Math.random() * aiMessages.length)];
-    setAIMessage(randomMsg);
-  }, 20000);
-  // Initial custom message
-  setAIMessage("💬 Yo warrior! I'm your AI coach. Tap me anytime for tips. Let's get swole! 🏋️");
+  function setAIMessage(msg) { document.getElementById('aiMessage').textContent = msg; }
+  function speakAIMessage() { speak(document.getElementById('aiMessage').textContent); }
 
-  // -------------------- VOICE HELPERS --------------------
+  // ---------- Idle reminder ----------
+  function resetIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (document.getElementById('dashboardScreen').classList.contains('active') && currentUser) {
+        speak("Hey " + currentUser.name + ", you haven't started a battle yet! Let's crush those push‑ups!");
+        setAIMessage("💤 Still resting, " + currentUser.name + "? Your push‑up target is waiting!");
+      }
+    }, 120000); // 2 minutes
+  }
+
+  // ---------- Streak & target updater ----------
+  async function updateDashboardInfo() {
+    if (!currentUser) return;
+    try {
+      const [streakRes, targetRes] = await Promise.all([
+        fetch('/api/streak?email=' + encodeURIComponent(currentUser.email)),
+        fetch('/api/target?email=' + encodeURIComponent(currentUser.email))
+      ]);
+      const streakData = await streakRes.json();
+      const targetData = await targetRes.json();
+      document.getElementById('streakDisplay').textContent = '🔥 Streak: ' + streakData.streak + ' days';
+      const done = targetData.todayDone;
+      const target = targetData.target;
+      document.getElementById('targetDisplay').textContent = `🎯 Target: ${done}/${target}`;
+      return { streak: streakData.streak, target, done };
+    } catch(e) { return { streak: 0, target: 10, done: 0 }; }
+  }
+
+  // ---------- Voice welcome on dashboard ----------
+  async function speakDashboardWelcome() {
+    if (!currentUser) return;
+    const { streak, target, done } = await updateDashboardInfo();
+    const remaining = Math.max(0, target - done);
+    const msg = `Welcome back, ${currentUser.name}! Your streak is ${streak} days. Today's push‑up target is ${target}. You've done ${done}, ${remaining} to go!`;
+    speak(msg);
+    setAIMessage("💬 " + msg);
+    resetIdleTimer();
+  }
+
+  // ---------- VOICE HELPERS (original) ----------
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
     msg.lang = 'en-US'; msg.rate = 0.9; msg.pitch = 1.1;
@@ -466,7 +544,7 @@ FRONTEND_HTML = """
     const femaleVoice = voices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha') || v.name.toLowerCase().includes('google uk female') || v.name.toLowerCase().includes('microsoft zira'));
     if (femaleVoice) msg.voice = femaleVoice;
     speechSynthesis.speak(msg);
-    setAIMessage("💬 Welcome to the arena, warrior! I'll be your AI coach. Tap me for motivation!");
+    speakDashboardWelcome();
   }
   function speakChampion() {
     const msg = new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger.");
@@ -477,7 +555,7 @@ FRONTEND_HTML = """
     speechSynthesis.speak(msg);
   }
 
-  // -------------------- USER FLOW --------------------
+  // ---------- USER FLOW ----------
   async function saveProfile(){
     const n = document.getElementById('nameInput').value.trim();
     const nat = document.getElementById('nationalityInput').value.trim();
@@ -487,11 +565,10 @@ FRONTEND_HTML = """
     if(!em.includes('@') || !em.includes('.')){ err.textContent = 'Please enter a valid email'; return; }
     const checkRes = await fetch('/api/check-email', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: em})});
     const checkData = await checkRes.json();
-    if(checkData.exists){ err.textContent = 'This email is already registered. Please use a different email or contact the CEO to recover your account.'; return; }
+    if(checkData.exists){ err.textContent = 'This email is already registered.'; return; }
     err.textContent = '';
     currentUser = {name: n, nationality: nat, email: em};
     localStorage.setItem('pushclash_user', JSON.stringify(currentUser));
-    fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: em})});
     showScreen('instructionScreen');
   }
 
@@ -500,8 +577,8 @@ FRONTEND_HTML = """
   });
 
   function resetProfile(){ localStorage.removeItem('pushclash_user'); currentUser=null; showScreen('setupScreen'); }
-  function showScreen(id){ document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active')); document.getElementById(id).classList.add('active'); if(id!=='dashboardScreen') document.getElementById('saveConfirmation').style.display='none'; }
-  function goToDashboard(){ if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; } loadStats(); showScreen('dashboardScreen'); setAIMessage("💬 Great battle! Check your stats to see your progress. Consistency is key!"); }
+  function showScreen(id){ document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active')); document.getElementById(id).classList.add('active'); if(id!=='dashboardScreen') document.getElementById('saveConfirmation').style.display='none'; if(id==='dashboardScreen') { resetIdleTimer(); updateDashboardInfo(); } }
+  function goToDashboard(){ if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; } loadStats(); showScreen('dashboardScreen'); resetIdleTimer(); }
 
   async function loadStats(){
     if(!currentUser) return;
@@ -511,12 +588,11 @@ FRONTEND_HTML = """
     const data = await res.json();
     document.getElementById('personalBest').textContent = data.personalBest;
     document.getElementById('totalBattles').textContent = data.totalBattles;
-    // Store for stats page
     localStorage.setItem('pushclash_stats', JSON.stringify(data));
     refreshActiveCount();
   }
 
-  // -------------------- STATS PAGE --------------------
+  // ---------- STATS PAGE ----------
   async function showStats(){
     if(!currentUser) return;
     const res = await fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
@@ -526,21 +602,12 @@ FRONTEND_HTML = """
     document.getElementById('statBattles').textContent = data.totalBattles;
     document.getElementById('statRank').textContent = data.rank;
     const container = document.getElementById('recentBattlesList');
-    if(!data.recentBattles.length){ container.innerHTML = '<p style="color:#aaa">No battles yet. Start your first one!</p>'; }
-    else { container.innerHTML = data.recentBattles.map(b=>`<div class="recent-item"><span>🔥 Score: ${b.score}</span><span class="small">${b.date}</span></div>`).join(''); }
-    // Practice tip
-    const best = data.personalBest;
-    let tip = "Complete your first battle to see personalised tips!";
-    if(best > 0 && best <= 10) tip = "Great start! Aim for 15 reps in your next battle. Slow down and focus on form.";
-    else if(best > 10 && best <= 25) tip = "Nice work! You're building real strength. Try doing push‑ups every other day for recovery.";
-    else if(best > 25 && best <= 40) tip = "You're a beast! Add explosive push‑ups to your routine to boost your max score.";
-    else if(best > 40) tip = "Elite warrior! Focus on breathing—exhale on the way up, inhale on the way down.";
-    document.getElementById('practiceTip').textContent = tip;
+    if(!data.recentBattles.length){ container.innerHTML = '<p style="color:#aaa">No battles yet.</p>'; }
+    else { container.innerHTML = data.recentBattles.map(b=>`<div class="recent-item"><span>🔥 ${b.score}</span><span class="small">${b.date}</span></div>`).join(''); }
     showScreen('statsScreen');
-    setAIMessage("💬 Let's review your stats! I can see you're improving. Keep pushing your limits!");
   }
 
-  // -------------------- CHALLENGE START --------------------
+  // ---------- CHALLENGE START ----------
   async function startChallenge(mode){
     challengeMode = mode;
     showScreen('challengeScreen');
@@ -554,10 +621,13 @@ FRONTEND_HTML = """
       count--;
       if(count===0){
         document.getElementById('countdownDisplay').textContent='GO!';
+        speak("Go!");
         setTimeout(()=>{ clearInterval(countdownInterval); document.getElementById('countdownDisplay').style.display='none'; startActiveChallenge(); }, 400);
-      } else { document.getElementById('countdownDisplay').textContent = count; }
+      } else {
+        document.getElementById('countdownDisplay').textContent = count;
+        speak(count.toString());
+      }
     }, 800);
-    setAIMessage("💪 Let's go! Give it everything you've got. I believe in you!");
   }
 
   async function startActiveChallenge(){
@@ -568,11 +638,29 @@ FRONTEND_HTML = """
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
     await startAICamera();
-    challengeInterval = setInterval(()=>{ timeLeft--; document.getElementById('timerDisplay').textContent = timeLeft; if(timeLeft<=0){ clearInterval(challengeInterval); endBattle(); } }, 1000);
+
+    // Battle voice cues
+    const cueInterval = setInterval(() => {
+      if (timeLeft > 55) return;
+      if (timeLeft === 30) speak("Halfway there, keep pushing!");
+      else if (timeLeft === 15) speak("15 seconds left, give it everything!");
+      else if (timeLeft === 10) speak("Final 10 seconds!");
+      else if (timeLeft <= 3 && timeLeft > 0) speak(timeLeft.toString());
+    }, 1000);
+
+    challengeInterval = setInterval(()=>{
+      timeLeft--;
+      document.getElementById('timerDisplay').textContent = timeLeft;
+      if(timeLeft<=0){
+        clearInterval(challengeInterval);
+        clearInterval(cueInterval);
+        endBattle();
+      }
+    }, 1000);
     if(currentUser) fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
   }
 
-  // -------------------- AI CAMERA --------------------
+  // ---------- AI CAMERA ----------
   let angleBuffer = [], lastRepTime = 0, aiState = 'up';
   async function startAICamera(){
     const video = document.getElementById('webcam'), canvas = document.getElementById('poseCanvas'), ctx = canvas.getContext('2d'), debugMsg = document.getElementById('debugMsg');
@@ -621,7 +709,7 @@ FRONTEND_HTML = """
   function calculateAngle(a,b,c){ const radians = Math.atan2(c.y-b.y, c.x-b.x) - Math.atan2(a.y-b.y, a.x-b.x); let angle = Math.abs(radians * 180.0 / Math.PI); if(angle > 180.0) angle = 360 - angle; return angle; }
   function drawSkeleton(ctx, kp){ const adj = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet); ctx.strokeStyle = '#0ff'; ctx.lineWidth = 2; for(const [p1,p2] of adj){ if(kp[p1].score > 0.3 && kp[p2].score > 0.3){ ctx.beginPath(); ctx.moveTo(kp[p1].x, kp[p1].y); ctx.lineTo(kp[p2].x, kp[p2].y); ctx.stroke(); } } for(const p of kp){ if(p.score > 0.3){ ctx.fillStyle='#f0f'; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,2*Math.PI); ctx.fill(); } } }
 
-  // -------------------- END BATTLE --------------------
+  // ---------- END BATTLE ----------
   async function endBattle(){
     if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; }
     document.getElementById('challengeActiveUI').style.display='none';
@@ -631,14 +719,14 @@ FRONTEND_HTML = """
     const champ = document.getElementById('championText'); champ.style.display='block'; speakChampion();
     await fetch('/api/battle', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:currentUser.name, nationality:currentUser.nationality, email:currentUser.email, score:repCount})});
     setTimeout(()=>{ champ.style.display='none'; }, 5000);
-    // AI analyses score
-    let aiMsg = `🔥 You did ${repCount} push‑ups! `;
-    if(repCount === 0) aiMsg += "Don't give up, warrior. Even the strongest started from zero.";
-    else if(repCount <= 10) aiMsg += "Nice warm‑up! Aim for 15 next time. Slow, controlled reps win.";
-    else if(repCount <= 25) aiMsg += "Solid effort! Your form is improving. Keep that back straight!";
-    else if(repCount <= 40) aiMsg += "Beast mode! You're in the top tier. How about 50 next battle?";
-    else aiMsg += "ELITE! You're a legend. The world better watch out!";
-    setAIMessage(aiMsg);
+    // AI post‑battle analysis
+    const stats = JSON.parse(localStorage.getItem('pushclash_stats') || '{}');
+    const pb = stats.personalBest || 0;
+    let analysis = `You scored ${repCount}. `;
+    if (repCount >= pb) analysis += "That's a new personal best! You're on fire!";
+    else analysis += `Your PB is ${pb}. You're getting closer!`;
+    speak(analysis);
+    setAIMessage("💬 " + analysis);
   }
 
   function shareScore(){ navigator.clipboard.writeText(`I just did ${repCount} push-ups in PushClash! Can you beat me? 🔥 ${BASE}`).then(()=>alert('Link copied!')); }
@@ -646,7 +734,7 @@ FRONTEND_HTML = """
   async function showLeaderboard(){
     showScreen('leaderboardScreen');
     const res = await fetch('/api/leaderboard'), data = await res.json(), container = document.getElementById('leaderboardList');
-    if(!data.length){ container.innerHTML = '<p style="text-align:center;color:#aaa">No battles in the last 7 days. Be the first!</p>'; return; }
+    if(!data.length){ container.innerHTML = '<p style="text-align:center;color:#aaa">No battles yet.</p>'; return; }
     container.innerHTML = data.map((b,i)=>{ const emojis = ['🥇','🥈','🥉'], rankDisp = i<3 ? emojis[i] : `#${i+1}`; const dateStr = b.date ? ` <span class="score-date">${b.date}</span>` : ''; return `<div class="leaderboard-item"><span class="rank">${rankDisp}</span><span>${b.name}</span><span class="small">${b.nationality}</span><span class="score">${b.score}${dateStr}</span></div>`; }).join('');
   }
 
