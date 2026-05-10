@@ -201,11 +201,10 @@ def daily_target():
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     cur.execute('SELECT COALESCE(SUM(score), 0) FROM battles WHERE email = %s AND timestamp >= %s', (email, today_start))
     today_done = cur.fetchone()[0]
-    # Average of last 7 days
     seven_days_ago = today_start - timedelta(days=7)
     cur.execute('SELECT COALESCE(AVG(daily_total), 0) FROM (SELECT SUM(score) as daily_total FROM battles WHERE email = %s AND timestamp >= %s GROUP BY DATE(timestamp)) sub', (email, seven_days_ago))
     avg = cur.fetchone()[0]
-    target = max(10, int(avg * 1.2) + 5)  # progressive overload
+    target = max(10, int(avg * 1.2) + 5)
     return jsonify({'target': target, 'todayDone': today_done})
 
 @app.route('/api/active_users')
@@ -233,7 +232,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Ultimate Immersion AI Assistant) ----------
+# ---------- Frontend (Camera Black Screen FIX applied) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -448,7 +447,7 @@ FRONTEND_HTML = """
       <h2>⚔️ Battle Over!</h2>
       <div style="font-size:3rem;color:#0ff" id="finalScore">0</div>
       <div class="result-msg" id="trashTalk"></div>
-      <div class="champion-voice-text" id="championText" style="display:none">“Champions are built in losses, my friend. Come back stronger.”</div>
+      <div class="champion-voice-text" id="championText" style="display:none">"Champions are built in losses, my friend. Come back stronger."</div>
       <button class="btn-primary" onclick="shareScore()">📢 Share My Score</button>
       <button class="btn-secondary" onclick="goToDashboard()">Back to Arena</button>
     </div>
@@ -504,7 +503,7 @@ FRONTEND_HTML = """
         speak("Hey " + currentUser.name + ", you haven't started a battle yet! Let's crush those push‑ups!");
         setAIMessage("💤 Still resting, " + currentUser.name + "? Your push‑up target is waiting!");
       }
-    }, 120000); // 2 minutes
+    }, 120000);
   }
 
   // ---------- Streak & target updater ----------
@@ -660,17 +659,66 @@ FRONTEND_HTML = """
     if(currentUser) fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
   }
 
-  // ---------- AI CAMERA ----------
+  // ---------- AI CAMERA (FIXED: NO RESOLUTION CONSTRAINTS) ----------
   let angleBuffer = [], lastRepTime = 0, aiState = 'up';
+
   async function startAICamera(){
-    const video = document.getElementById('webcam'), canvas = document.getElementById('poseCanvas'), ctx = canvas.getContext('2d'), debugMsg = document.getElementById('debugMsg');
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('poseCanvas');
+    const ctx = canvas.getContext('2d');
+    const debugMsg = document.getElementById('debugMsg');
+
+    // First, make video visible immediately to avoid any CSS hiding issues
+    video.style.display = 'block';
+    video.style.width = '100%';
+    video.style.height = '100%';
+    video.style.objectFit = 'cover';
+    video.setAttribute('playsinline', '');
+    video.setAttribute('autoplay', '');
+
+    // Try camera WITHOUT any width/height constraints (fixes black screen on many Android devices)
     try {
-      aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      video.srcObject = aiStream; await video.play();
-      debugMsg.textContent = '✅ AI ready – show yourself!';
-    } catch(e) { debugMsg.textContent = '❌ Camera access denied!'; return; }
-    video.addEventListener('loadedmetadata', ()=>{ canvas.width = video.videoWidth; canvas.height = video.videoHeight; });
-    try { aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {modelType: 'SinglePose.Lightning'}); } catch(e) { debugMsg.textContent = '❌ AI model failed.'; return; }
+      aiStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' }
+      });
+      video.srcObject = aiStream;
+      await video.play();
+      debugMsg.textContent = '✅ Camera ready – show yourself!';
+      debugMsg.style.color = '#0f0';
+    } catch(e) {
+      // Fallback: try with very basic constraints
+      try {
+        aiStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = aiStream;
+        await video.play();
+        debugMsg.textContent = '✅ Camera ready (basic mode)';
+        debugMsg.style.color = '#0f0';
+      } catch(e2) {
+        debugMsg.textContent = '❌ Camera access denied! Check browser permissions.';
+        debugMsg.style.color = '#f44';
+        video.style.display = 'none';
+        return;
+      }
+    }
+
+    // Wait for video metadata to load before setting canvas dimensions
+    video.addEventListener('loadedmetadata', () => {
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      // Ensure canvas is also visible
+      canvas.style.display = 'block';
+    });
+
+    // Load AI model
+    try {
+      const cfg = { modelType: 'SinglePose.Lightning' };
+      aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, cfg);
+    } catch(e) {
+      debugMsg.textContent = '❌ AI model failed to load. Check your internet.';
+      debugMsg.style.color = '#f44';
+      return;
+    }
+
     angleBuffer = []; lastRepTime = 0; aiState = 'up';
     requestAnimationFrame(detectPose);
   }
@@ -692,6 +740,7 @@ FRONTEND_HTML = """
         if(sa===null){ requestAnimationFrame(detectPose); return; }
         overlay.textContent = Math.round(sa) + '°'; overlay.style.display='block';
         debugMsg.textContent = '🟢 Active – ' + Math.round(sa) + '°';
+        debugMsg.style.color = '#fa0';
         const now = Date.now();
         if(aiState==='up' && sa < 90){ aiState = 'down'; }
         else if(aiState==='down' && sa > 160){
@@ -701,8 +750,8 @@ FRONTEND_HTML = """
           }
           aiState = 'up';
         }
-      } else { overlay.textContent = '?'; overlay.style.display='block'; debugMsg.textContent = '⚠️ Not all keypoints visible'; }
-    } else { overlay.textContent = '?'; overlay.style.display='block'; debugMsg.textContent = '🔍 Searching for pose...'; }
+      } else { overlay.textContent = '?'; overlay.style.display='block'; debugMsg.textContent = '⚠️ Not all keypoints visible'; debugMsg.style.color = '#fa0'; }
+    } else { overlay.textContent = '?'; overlay.style.display='block'; debugMsg.textContent = '🔍 Searching for pose...'; debugMsg.style.color = '#fa0'; }
     requestAnimationFrame(detectPose);
   }
 
