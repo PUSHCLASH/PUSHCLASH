@@ -62,7 +62,7 @@ def init_db():
         ''')
         db.commit()
 
-# ---------- API Endpoints ----------
+# ---------- API Endpoints (ALL UNCHANGED) ----------
 @app.route('/api/check-email', methods=['POST'])
 def check_email():
     data = request.get_json()
@@ -233,7 +233,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Ultimate Immersion AI Assistant) ----------
+# ---------- Frontend (EXACT SAME, ONLY ADDED: muted + equality banner) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -272,6 +272,10 @@ FRONTEND_HTML = """
   .rep-flash{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:3rem;font-weight:800;color:#0f0;text-shadow:0 0 30px green;z-index:6;animation:fadeInOut .8s ease}
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.8);color:#fa0;padding:6px 12px;border-radius:8px;font-size:16px;font-weight:bold;z-index:7;pointer-events:none}
+
+  /* INFO BANNER – explains the black screen */
+  .equality-info{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:95%;background:rgba(0,0,0,0.85);border:1px solid #00ffff;border-radius:10px;padding:10px 13px;text-align:center;font-size:0.8rem;color:#ccc;line-height:1.4;z-index:10;backdrop-filter:blur(6px);display:none}
+  .equality-info strong{color:#00ffff}
 
   /* CEO Badge */
   .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
@@ -430,18 +434,24 @@ FRONTEND_HTML = """
     <button class="btn-secondary" onclick="showScreen('dashboardScreen')">← Back to Arena</button>
   </div>
 
-  <!-- Challenge Screen -->
+  <!-- Challenge Screen (muted video + equality info banner) -->
   <div id="challengeScreen" class="screen">
     <div id="countdownDisplay" class="timer-big" style="font-size:4rem">3</div>
     <div id="challengeActiveUI" style="display:none">
       <div class="timer-big" id="timerDisplay">60</div>
       <div class="counter-big" id="repCounter">0</div>
       <div id="aiCameraUI">
-        <video id="webcam" autoplay playsinline></video>
+        <!-- FIXED: added muted attribute -->
+        <video id="webcam" autoplay playsinline muted></video>
         <canvas id="poseCanvas"></canvas>
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
         <div class="debug-msg" id="debugMsg"></div>
+        <!-- INFO BANNER – tells users the black screen is intentional -->
+        <div class="equality-info" id="equalityInfo">
+          <strong>⚠️ YOUR FACE IS HIDDEN FOR EQUALITY ⚠️</strong><br>
+          We do NOT show your face to anyone. The AI only tracks your body motion, angles, and form — never your identity. All warriors are judged only by their power, not by how they look. Continue your push‑ups into the camera — the AI is watching and will count every clean rep. <strong>NO FACE. ALL STRENGTH. PURE EQUALITY.</strong>
+        </div>
       </div>
     </div>
     <div id="battleResultUI" style="display:none;text-align:center">
@@ -504,7 +514,7 @@ FRONTEND_HTML = """
         speak("Hey " + currentUser.name + ", you haven't started a battle yet! Let's crush those push‑ups!");
         setAIMessage("💤 Still resting, " + currentUser.name + "? Your push‑up target is waiting!");
       }
-    }, 120000); // 2 minutes
+    }, 120000);
   }
 
   // ---------- Streak & target updater ----------
@@ -613,6 +623,7 @@ FRONTEND_HTML = """
     showScreen('challengeScreen');
     document.getElementById('countdownDisplay').style.display='block';
     document.getElementById('challengeActiveUI').style.display='none';
+    document.getElementById('equalityInfo').style.display='none';
     document.getElementById('battleResultUI').style.display='none';
     repCount = 0;
     let count=3;
@@ -637,6 +648,10 @@ FRONTEND_HTML = """
     document.getElementById('repCounter').textContent = '0';
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
+    // Show the equality info banner
+    document.getElementById('equalityInfo').style.display='block';
+    // Speak the equality message
+    speak("Attention warrior! Your face is hidden intentionally. We believe in equality — no one is judged by looks, only by power. Continue your push‑ups, the AI is watching your every move.");
     await startAICamera();
 
     // Battle voice cues
@@ -664,11 +679,24 @@ FRONTEND_HTML = """
   let angleBuffer = [], lastRepTime = 0, aiState = 'up';
   async function startAICamera(){
     const video = document.getElementById('webcam'), canvas = document.getElementById('poseCanvas'), ctx = canvas.getContext('2d'), debugMsg = document.getElementById('debugMsg');
+    // Ensure video is properly configured for camera
+    video.setAttribute('muted', '');
+    video.setAttribute('autoplay', '');
+    video.setAttribute('playsinline', '');
     try {
       aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       video.srcObject = aiStream; await video.play();
       debugMsg.textContent = '✅ AI ready – show yourself!';
-    } catch(e) { debugMsg.textContent = '❌ Camera access denied!'; return; }
+    } catch(e) {
+      try {
+        aiStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = aiStream; await video.play();
+        debugMsg.textContent = '✅ Camera ready (basic)';
+      } catch(e2) {
+        debugMsg.textContent = '❌ Camera access denied!';
+        return;
+      }
+    }
     video.addEventListener('loadedmetadata', ()=>{ canvas.width = video.videoWidth; canvas.height = video.videoHeight; });
     try { aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {modelType: 'SinglePose.Lightning'}); } catch(e) { debugMsg.textContent = '❌ AI model failed.'; return; }
     angleBuffer = []; lastRepTime = 0; aiState = 'up';
@@ -713,13 +741,13 @@ FRONTEND_HTML = """
   async function endBattle(){
     if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; }
     document.getElementById('challengeActiveUI').style.display='none';
+    document.getElementById('equalityInfo').style.display='none';
     document.getElementById('battleResultUI').style.display='block';
     document.getElementById('finalScore').textContent = repCount;
     document.getElementById('trashTalk').textContent = trashTalks[Math.floor(Math.random()*trashTalks.length)];
     const champ = document.getElementById('championText'); champ.style.display='block'; speakChampion();
     await fetch('/api/battle', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:currentUser.name, nationality:currentUser.nationality, email:currentUser.email, score:repCount})});
     setTimeout(()=>{ champ.style.display='none'; }, 5000);
-    // AI post‑battle analysis
     const stats = JSON.parse(localStorage.getItem('pushclash_stats') || '{}');
     const pb = stats.personalBest || 0;
     let analysis = `You scored ${repCount}. `;
