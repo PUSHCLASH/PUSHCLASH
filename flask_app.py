@@ -233,7 +233,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (equality banner auto‑dismiss after 6 seconds) ----------
+# ---------- Frontend (THRESHOLD 150° + camera startup improvement) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -653,6 +653,8 @@ FRONTEND_HTML = """
     document.getElementById('repCounter').textContent = '0';
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
+    // Pre‑load the AI model as early as possible to reduce "Searching for pose..." time
+    startAIModel();
 
     // Show the equality info banner
     const infoBanner = document.getElementById('equalityInfo');
@@ -689,7 +691,18 @@ FRONTEND_HTML = """
     if(currentUser) fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
   }
 
-  // ---------- AI CAMERA ----------
+  // ---------- Pre‑load the AI model (starts loading before camera is fully ready) ----------
+  async function startAIModel(){
+    try {
+      const cfg = { modelType: 'SinglePose.Lightning' };
+      aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, cfg);
+      document.getElementById('debugMsg').textContent = '✅ AI ready – show yourself!';
+    } catch(e) {
+      document.getElementById('debugMsg').textContent = '❌ AI model failed. Check internet.';
+    }
+  }
+
+  // ---------- AI CAMERA (FIXED THRESHOLD: 150° instead of 160°) ----------
   let angleBuffer = [], lastRepTime = 0, aiState = 'up';
   async function startAICamera(){
     const video = document.getElementById('webcam'), canvas = document.getElementById('poseCanvas'), ctx = canvas.getContext('2d'), debugMsg = document.getElementById('debugMsg');
@@ -700,7 +713,6 @@ FRONTEND_HTML = """
     try {
       aiStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       video.srcObject = aiStream; await video.play();
-      debugMsg.textContent = '✅ AI ready – show yourself!';
     } catch(e) {
       try {
         aiStream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -712,7 +724,6 @@ FRONTEND_HTML = """
       }
     }
     video.addEventListener('loadedmetadata', ()=>{ canvas.width = video.videoWidth; canvas.height = video.videoHeight; });
-    try { aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {modelType: 'SinglePose.Lightning'}); } catch(e) { debugMsg.textContent = '❌ AI model failed.'; return; }
     angleBuffer = []; lastRepTime = 0; aiState = 'up';
     requestAnimationFrame(detectPose);
   }
@@ -735,8 +746,9 @@ FRONTEND_HTML = """
         overlay.textContent = Math.round(sa) + '°'; overlay.style.display='block';
         debugMsg.textContent = '🟢 Active – ' + Math.round(sa) + '°';
         const now = Date.now();
+        // FIXED: up threshold lowered from 160° to 150° for better counting
         if(aiState==='up' && sa < 90){ aiState = 'down'; }
-        else if(aiState==='down' && sa > 160){
+        else if(aiState==='down' && sa > 150){
           if(now - lastRepTime > 500){
             repCount++; document.getElementById('repCounter').textContent = repCount; lastRepTime = now;
             const flash = document.getElementById('repFlash'); flash.style.display='block'; setTimeout(()=>{ flash.style.display='none'; }, 800);
