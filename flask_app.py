@@ -233,7 +233,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (EXACT SAME, ONLY ADDED: muted + equality banner) ----------
+# ---------- Frontend (equality banner auto‑dismiss after 6 seconds) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -273,9 +273,11 @@ FRONTEND_HTML = """
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.8);color:#fa0;padding:6px 12px;border-radius:8px;font-size:16px;font-weight:bold;z-index:7;pointer-events:none}
 
-  /* INFO BANNER – explains the black screen */
+  /* INFO BANNER – auto‑dismiss after 6s */
   .equality-info{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:95%;background:rgba(0,0,0,0.85);border:1px solid #00ffff;border-radius:10px;padding:10px 13px;text-align:center;font-size:0.8rem;color:#ccc;line-height:1.4;z-index:10;backdrop-filter:blur(6px);display:none}
   .equality-info strong{color:#00ffff}
+  .fade-out{animation:fadeOutBanner 1s ease forwards}
+  @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
 
   /* CEO Badge */
   .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
@@ -434,7 +436,7 @@ FRONTEND_HTML = """
     <button class="btn-secondary" onclick="showScreen('dashboardScreen')">← Back to Arena</button>
   </div>
 
-  <!-- Challenge Screen (muted video + equality info banner) -->
+  <!-- Challenge Screen (muted video + auto‑dismiss equality info) -->
   <div id="challengeScreen" class="screen">
     <div id="countdownDisplay" class="timer-big" style="font-size:4rem">3</div>
     <div id="challengeActiveUI" style="display:none">
@@ -447,7 +449,7 @@ FRONTEND_HTML = """
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
         <div class="debug-msg" id="debugMsg"></div>
-        <!-- INFO BANNER – tells users the black screen is intentional -->
+        <!-- INFO BANNER – auto‑dismiss after 6 seconds -->
         <div class="equality-info" id="equalityInfo">
           <strong>⚠️ YOUR FACE IS HIDDEN FOR EQUALITY ⚠️</strong><br>
           We do NOT show your face to anyone. The AI only tracks your body motion, angles, and form — never your identity. All warriors are judged only by their power, not by how they look. Continue your push‑ups into the camera — the AI is watching and will count every clean rep. <strong>NO FACE. ALL STRENGTH. PURE EQUALITY.</strong>
@@ -480,6 +482,7 @@ FRONTEND_HTML = """
   let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval, countdownInterval, challengeMode = 'ai', aiDetector = null, aiStream = null;
   let muteAI = false;
   let idleTimer = null;
+  let equalityTimer = null;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
@@ -624,7 +627,9 @@ FRONTEND_HTML = """
     document.getElementById('countdownDisplay').style.display='block';
     document.getElementById('challengeActiveUI').style.display='none';
     document.getElementById('equalityInfo').style.display='none';
+    document.getElementById('equalityInfo').classList.remove('fade-out');
     document.getElementById('battleResultUI').style.display='none';
+    if (equalityTimer) clearTimeout(equalityTimer);
     repCount = 0;
     let count=3;
     document.getElementById('countdownDisplay').textContent = count;
@@ -648,10 +653,19 @@ FRONTEND_HTML = """
     document.getElementById('repCounter').textContent = '0';
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
+
     // Show the equality info banner
-    document.getElementById('equalityInfo').style.display='block';
+    const infoBanner = document.getElementById('equalityInfo');
+    infoBanner.style.display='block';
+    infoBanner.classList.remove('fade-out');
     // Speak the equality message
     speak("Attention warrior! Your face is hidden intentionally. We believe in equality — no one is judged by looks, only by power. Continue your push‑ups, the AI is watching your every move.");
+    // AUTO‑DISMISS after 6 seconds
+    equalityTimer = setTimeout(() => {
+      infoBanner.classList.add('fade-out');
+      setTimeout(() => { infoBanner.style.display='none'; }, 1000);
+    }, 6000);
+
     await startAICamera();
 
     // Battle voice cues
@@ -740,6 +754,7 @@ FRONTEND_HTML = """
   // ---------- END BATTLE ----------
   async function endBattle(){
     if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; }
+    if (equalityTimer) clearTimeout(equalityTimer);
     document.getElementById('challengeActiveUI').style.display='none';
     document.getElementById('equalityInfo').style.display='none';
     document.getElementById('battleResultUI').style.display='block';
