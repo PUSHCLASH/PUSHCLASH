@@ -233,7 +233,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (CEO WhatsApp button added) ----------
+# ---------- Frontend (CAMERA FEED NOW VISIBLE + all features intact) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -264,10 +264,16 @@ FRONTEND_HTML = """
   .score-date{font-size:.75rem;color:#888;margin-left:6px}
   .result-msg{text-align:center;font-size:1.3rem;margin:12px 0;font-style:italic;color:#f0f}
   .small{font-size:.85rem;color:#aaa}.share-btn{background:#0ff;color:black}
-  video,canvas{width:100%;border-radius:14px;background:#000}
+
+  /* ─────────── CAMERA FIX ─────────── */
+  /* The video must show through the canvas */
+  video{width:100%;border-radius:14px;background:#000}
+  canvas{width:100%;border-radius:14px;background:transparent !important;pointer-events:none}
   #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden;background:#000;display:block}
-  #aiCameraUI video{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2}
-  #aiCameraUI canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:3}
+  #aiCameraUI video{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:3}
+  #aiCameraUI canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2;background:transparent !important}
+  /* ───────────────────────────────── */
+
   .angle-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;font-weight:800;color:#0ff;text-shadow:0 0 30px cyan;pointer-events:none;z-index:5}
   .rep-flash{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:3rem;font-weight:800;color:#0f0;text-shadow:0 0 30px green;z-index:6;animation:fadeInOut .8s ease}
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
@@ -340,7 +346,7 @@ FRONTEND_HTML = """
 </div>
 <div class="ceo-arrow">👉</div>
 
-<!-- CEO Modal (WhatsApp button added) -->
+<!-- CEO Modal -->
 <div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
   <div class="ceo-modal" onclick="event.stopPropagation()">
     <div style="font-size:2rem;margin-bottom:8px">👑</div>
@@ -355,7 +361,7 @@ FRONTEND_HTML = """
   </div>
 </div>
 
-<!-- AI Assistant (Ultimate Immersion) -->
+<!-- AI Assistant -->
 <div class="ai-assistant" id="aiAssistant" onclick="speakAIMessage()">
   <button class="ai-mute" id="aiMuteBtn" onclick="event.stopPropagation(); toggleMute()">🔊</button>
   <span class="ai-msg" id="aiMessage">💬 Loading your coach...</span>
@@ -412,7 +418,7 @@ FRONTEND_HTML = """
     <div class="success-msg" id="saveConfirmation" style="display:none">✅ Score saved to global arena!</div>
   </div>
 
-  <!-- Stats Screen (with weekly plan) -->
+  <!-- Stats Screen -->
   <div id="statsScreen" class="screen">
     <h1>📊 MY STATS & PLAN</h1>
     <div class="stats-box">
@@ -440,20 +446,20 @@ FRONTEND_HTML = """
     <button class="btn-secondary" onclick="showScreen('dashboardScreen')">← Back to Arena</button>
   </div>
 
-  <!-- Challenge Screen (muted video + auto‑dismiss equality info) -->
+  <!-- Challenge Screen (VIDEO NOW VISIBLE – canvas behind video with transparent background) -->
   <div id="challengeScreen" class="screen">
     <div id="countdownDisplay" class="timer-big" style="font-size:4rem">3</div>
     <div id="challengeActiveUI" style="display:none">
       <div class="timer-big" id="timerDisplay">60</div>
       <div class="counter-big" id="repCounter">0</div>
       <div id="aiCameraUI">
-        <!-- FIXED: added muted attribute -->
-        <video id="webcam" autoplay playsinline muted></video>
+        <!-- Canvas first (lower z-index), video on top -->
         <canvas id="poseCanvas"></canvas>
+        <video id="webcam" autoplay playsinline muted></video>
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
         <div class="debug-msg" id="debugMsg"></div>
-        <!-- INFO BANNER – auto‑dismiss after 6 seconds -->
+        <!-- INFO BANNER – auto‑dismiss after 6s -->
         <div class="equality-info" id="equalityInfo">
           <strong>⚠️ YOUR FACE IS HIDDEN FOR EQUALITY ⚠️</strong><br>
           We do NOT show your face to anyone. The AI only tracks your body motion, angles, and form — never your identity. All warriors are judged only by their power, not by how they look. Continue your push‑ups into the camera — the AI is watching and will count every clean rep. <strong>NO FACE. ALL STRENGTH. PURE EQUALITY.</strong>
@@ -657,14 +663,13 @@ FRONTEND_HTML = """
     document.getElementById('repCounter').textContent = '0';
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
-    // Pre‑load the AI model as early as possible to reduce "Searching for pose..." time
+    // Pre‑load the AI model as early as possible
     startAIModel();
 
     // Show the equality info banner
     const infoBanner = document.getElementById('equalityInfo');
     infoBanner.style.display='block';
     infoBanner.classList.remove('fade-out');
-    // Speak the equality message
     speak("Attention warrior! Your face is hidden intentionally. We believe in equality — no one is judged by looks, only by power. Continue your push‑ups, the AI is watching your every move.");
     // AUTO‑DISMISS after 6 seconds
     equalityTimer = setTimeout(() => {
@@ -695,7 +700,7 @@ FRONTEND_HTML = """
     if(currentUser) fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
   }
 
-  // ---------- Pre‑load the AI model (starts loading before camera is fully ready) ----------
+  // ---------- Pre‑load the AI model ----------
   async function startAIModel(){
     try {
       const cfg = { modelType: 'SinglePose.Lightning' };
@@ -706,11 +711,10 @@ FRONTEND_HTML = """
     }
   }
 
-  // ---------- AI CAMERA (FIXED THRESHOLD: 150° instead of 160°) ----------
+  // ---------- AI CAMERA (canvas background TRANSPARENT, video on top) ----------
   let angleBuffer = [], lastRepTime = 0, aiState = 'up';
   async function startAICamera(){
     const video = document.getElementById('webcam'), canvas = document.getElementById('poseCanvas'), ctx = canvas.getContext('2d'), debugMsg = document.getElementById('debugMsg');
-    // Ensure video is properly configured for camera
     video.setAttribute('muted', '');
     video.setAttribute('autoplay', '');
     video.setAttribute('playsinline', '');
@@ -750,7 +754,7 @@ FRONTEND_HTML = """
         overlay.textContent = Math.round(sa) + '°'; overlay.style.display='block';
         debugMsg.textContent = '🟢 Active – ' + Math.round(sa) + '°';
         const now = Date.now();
-        // FIXED: up threshold lowered from 160° to 150° for better counting
+        // Down threshold = 90°, up threshold = 150°
         if(aiState==='up' && sa < 90){ aiState = 'down'; }
         else if(aiState==='down' && sa > 150){
           if(now - lastRepTime > 500){
