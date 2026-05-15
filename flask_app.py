@@ -233,7 +233,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (CAMERA FEED NOW VISIBLE + all features intact) ----------
+# ---------- Frontend (motivational banner + visible camera) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -266,7 +266,6 @@ FRONTEND_HTML = """
   .small{font-size:.85rem;color:#aaa}.share-btn{background:#0ff;color:black}
 
   /* ─────────── CAMERA FIX ─────────── */
-  /* The video must show through the canvas */
   video{width:100%;border-radius:14px;background:#000}
   canvas{width:100%;border-radius:14px;background:transparent !important;pointer-events:none}
   #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden;background:#000;display:block}
@@ -279,9 +278,9 @@ FRONTEND_HTML = """
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.8);color:#fa0;padding:6px 12px;border-radius:8px;font-size:16px;font-weight:bold;z-index:7;pointer-events:none}
 
-  /* INFO BANNER – auto‑dismiss after 6s */
-  .equality-info{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:95%;background:rgba(0,0,0,0.85);border:1px solid #00ffff;border-radius:10px;padding:10px 13px;text-align:center;font-size:0.8rem;color:#ccc;line-height:1.4;z-index:10;backdrop-filter:blur(6px);display:none}
-  .equality-info strong{color:#00ffff}
+  /* MOTIVATIONAL BANNER – auto‑dismiss after 6s */
+  .motivation-banner{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:95%;background:rgba(0,0,0,0.85);border:1px solid #ff4500;border-radius:10px;padding:10px 13px;text-align:center;font-size:0.8rem;color:#ccc;line-height:1.4;z-index:10;backdrop-filter:blur(6px);display:none}
+  .motivation-banner strong{color:#ff4500}
   .fade-out{animation:fadeOutBanner 1s ease forwards}
   @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
 
@@ -446,23 +445,22 @@ FRONTEND_HTML = """
     <button class="btn-secondary" onclick="showScreen('dashboardScreen')">← Back to Arena</button>
   </div>
 
-  <!-- Challenge Screen (VIDEO NOW VISIBLE – canvas behind video with transparent background) -->
+  <!-- Challenge Screen (video now visible, motivational banner) -->
   <div id="challengeScreen" class="screen">
     <div id="countdownDisplay" class="timer-big" style="font-size:4rem">3</div>
     <div id="challengeActiveUI" style="display:none">
       <div class="timer-big" id="timerDisplay">60</div>
       <div class="counter-big" id="repCounter">0</div>
       <div id="aiCameraUI">
-        <!-- Canvas first (lower z-index), video on top -->
         <canvas id="poseCanvas"></canvas>
         <video id="webcam" autoplay playsinline muted></video>
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
         <div class="debug-msg" id="debugMsg"></div>
-        <!-- INFO BANNER – auto‑dismiss after 6s -->
-        <div class="equality-info" id="equalityInfo">
-          <strong>⚠️ YOUR FACE IS HIDDEN FOR EQUALITY ⚠️</strong><br>
-          We do NOT show your face to anyone. The AI only tracks your body motion, angles, and form — never your identity. All warriors are judged only by their power, not by how they look. Continue your push‑ups into the camera — the AI is watching and will count every clean rep. <strong>NO FACE. ALL STRENGTH. PURE EQUALITY.</strong>
+        <!-- NEW MOTIVATIONAL BANNER -->
+        <div class="motivation-banner" id="motivationBanner">
+          <strong>👁️ THE AI IS WATCHING EVERY REP 👁️</strong><br>
+          Start your push‑ups NOW! No distractions, no excuses — pure power only. The AI referee sees every move and counts every clean rep. Show the world what you’re made of! 💪🚀
         </div>
       </div>
     </div>
@@ -492,7 +490,7 @@ FRONTEND_HTML = """
   let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval, countdownInterval, challengeMode = 'ai', aiDetector = null, aiStream = null;
   let muteAI = false;
   let idleTimer = null;
-  let equalityTimer = null;
+  let bannerTimer = null;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
@@ -636,10 +634,10 @@ FRONTEND_HTML = """
     showScreen('challengeScreen');
     document.getElementById('countdownDisplay').style.display='block';
     document.getElementById('challengeActiveUI').style.display='none';
-    document.getElementById('equalityInfo').style.display='none';
-    document.getElementById('equalityInfo').classList.remove('fade-out');
+    document.getElementById('motivationBanner').style.display='none';
+    document.getElementById('motivationBanner').classList.remove('fade-out');
     document.getElementById('battleResultUI').style.display='none';
-    if (equalityTimer) clearTimeout(equalityTimer);
+    if (bannerTimer) clearTimeout(bannerTimer);
     repCount = 0;
     let count=3;
     document.getElementById('countdownDisplay').textContent = count;
@@ -663,23 +661,19 @@ FRONTEND_HTML = """
     document.getElementById('repCounter').textContent = '0';
     document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent = '📷 Camera starting...';
-    // Pre‑load the AI model as early as possible
     startAIModel();
 
-    // Show the equality info banner
-    const infoBanner = document.getElementById('equalityInfo');
-    infoBanner.style.display='block';
-    infoBanner.classList.remove('fade-out');
-    speak("Attention warrior! Your face is hidden intentionally. We believe in equality — no one is judged by looks, only by power. Continue your push‑ups, the AI is watching your every move.");
-    // AUTO‑DISMISS after 6 seconds
-    equalityTimer = setTimeout(() => {
-      infoBanner.classList.add('fade-out');
-      setTimeout(() => { infoBanner.style.display='none'; }, 1000);
+    const banner = document.getElementById('motivationBanner');
+    banner.style.display='block';
+    banner.classList.remove('fade-out');
+    speak("AI is locked on you. Start pushing now — every rep counts! Go go go!");
+    bannerTimer = setTimeout(() => {
+      banner.classList.add('fade-out');
+      setTimeout(() => { banner.style.display='none'; }, 1000);
     }, 6000);
 
     await startAICamera();
 
-    // Battle voice cues
     const cueInterval = setInterval(() => {
       if (timeLeft > 55) return;
       if (timeLeft === 30) speak("Halfway there, keep pushing!");
@@ -700,7 +694,6 @@ FRONTEND_HTML = """
     if(currentUser) fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
   }
 
-  // ---------- Pre‑load the AI model ----------
   async function startAIModel(){
     try {
       const cfg = { modelType: 'SinglePose.Lightning' };
@@ -711,7 +704,6 @@ FRONTEND_HTML = """
     }
   }
 
-  // ---------- AI CAMERA (canvas background TRANSPARENT, video on top) ----------
   let angleBuffer = [], lastRepTime = 0, aiState = 'up';
   async function startAICamera(){
     const video = document.getElementById('webcam'), canvas = document.getElementById('poseCanvas'), ctx = canvas.getContext('2d'), debugMsg = document.getElementById('debugMsg');
@@ -754,7 +746,6 @@ FRONTEND_HTML = """
         overlay.textContent = Math.round(sa) + '°'; overlay.style.display='block';
         debugMsg.textContent = '🟢 Active – ' + Math.round(sa) + '°';
         const now = Date.now();
-        // Down threshold = 90°, up threshold = 150°
         if(aiState==='up' && sa < 90){ aiState = 'down'; }
         else if(aiState==='down' && sa > 150){
           if(now - lastRepTime > 500){
@@ -771,12 +762,11 @@ FRONTEND_HTML = """
   function calculateAngle(a,b,c){ const radians = Math.atan2(c.y-b.y, c.x-b.x) - Math.atan2(a.y-b.y, a.x-b.x); let angle = Math.abs(radians * 180.0 / Math.PI); if(angle > 180.0) angle = 360 - angle; return angle; }
   function drawSkeleton(ctx, kp){ const adj = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet); ctx.strokeStyle = '#0ff'; ctx.lineWidth = 2; for(const [p1,p2] of adj){ if(kp[p1].score > 0.3 && kp[p2].score > 0.3){ ctx.beginPath(); ctx.moveTo(kp[p1].x, kp[p1].y); ctx.lineTo(kp[p2].x, kp[p2].y); ctx.stroke(); } } for(const p of kp){ if(p.score > 0.3){ ctx.fillStyle='#f0f'; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,2*Math.PI); ctx.fill(); } } }
 
-  // ---------- END BATTLE ----------
   async function endBattle(){
     if(aiStream){ aiStream.getTracks().forEach(t=>t.stop()); aiStream=null; }
-    if (equalityTimer) clearTimeout(equalityTimer);
+    if (bannerTimer) clearTimeout(bannerTimer);
     document.getElementById('challengeActiveUI').style.display='none';
-    document.getElementById('equalityInfo').style.display='none';
+    document.getElementById('motivationBanner').style.display='none';
     document.getElementById('battleResultUI').style.display='block';
     document.getElementById('finalScore').textContent = repCount;
     document.getElementById('trashTalk').textContent = trashTalks[Math.floor(Math.random()*trashTalks.length)];
@@ -801,7 +791,6 @@ FRONTEND_HTML = """
     container.innerHTML = data.map((b,i)=>{ const emojis = ['🥇','🥈','🥉'], rankDisp = i<3 ? emojis[i] : `#${i+1}`; const dateStr = b.date ? ` <span class="score-date">${b.date}</span>` : ''; return `<div class="leaderboard-item"><span class="rank">${rankDisp}</span><span>${b.name}</span><span class="small">${b.nationality}</span><span class="score">${b.score}${dateStr}</span></div>`; }).join('');
   }
 
-  // Init
   currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
   if(currentUser){ showScreen('dashboardScreen'); loadStats(); } else { showScreen('setupScreen'); }
 </script>
