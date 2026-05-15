@@ -233,7 +233,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (THRESHOLD 150° + camera startup improvement) ----------
+# ---------- Frontend (CEO WhatsApp button added) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -299,6 +299,8 @@ FRONTEND_HTML = """
   .ceo-modal .title{color:#fa0;font-weight:bold;margin-bottom:10px;font-size:.95rem}
   .ceo-modal .phone{color:#0ff;font-size:1.3rem;margin:8px 0;font-weight:bold}
   .close-btn{background:none;border:1px solid #555;color:#aaa;padding:6px 20px;border-radius:20px;margin-top:18px;cursor:pointer}
+  .wa-btn{display:inline-block;margin-top:12px;background:#25D366;color:#fff;padding:10px 18px;border-radius:25px;text-decoration:none;font-weight:bold;font-size:1rem;box-shadow:0 0 12px rgba(37,211,102,0.5)}
+  .wa-btn:hover{background:#1ebe5b}
 
   /* Instruction screen */
   .instruction-box{background:rgba(0,0,0,0.8);border-radius:20px;padding:20px;margin:20px 0}
@@ -338,7 +340,7 @@ FRONTEND_HTML = """
 </div>
 <div class="ceo-arrow">👉</div>
 
-<!-- CEO Modal -->
+<!-- CEO Modal (WhatsApp button added) -->
 <div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
   <div class="ceo-modal" onclick="event.stopPropagation()">
     <div style="font-size:2rem;margin-bottom:8px">👑</div>
@@ -346,7 +348,9 @@ FRONTEND_HTML = """
     <div class="title">CEO OF PUSH CLASH</div>
     <div style="color:#ccc;font-size:0.9rem;margin:6px 0">Have a query? Get in touch</div>
     <div class="phone">📞 8950592855</div>
-    <div style="color:#aaa;font-size:0.7rem">Tap to call (coming soon)</div>
+    <div style="color:#aaa;font-size:0.7rem">Tap to call / message</div>
+    <!-- WhatsApp Message Button -->
+    <a href="https://wa.me/918950592855?text=Hey%20Kaushtubh%2C%20I%20have%20a%20query%20about%20PushClash" target="_blank" class="wa-btn">📱 Message on WhatsApp</a>
     <button class="close-btn" onclick="document.getElementById('ceoModal').classList.remove('active')">Close</button>
   </div>
 </div>
