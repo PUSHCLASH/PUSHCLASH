@@ -201,11 +201,10 @@ def daily_target():
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     cur.execute('SELECT COALESCE(SUM(score), 0) FROM battles WHERE email = %s AND timestamp >= %s', (email, today_start))
     today_done = cur.fetchone()[0]
-    # Average of last 7 days
     seven_days_ago = today_start - timedelta(days=7)
     cur.execute('SELECT COALESCE(AVG(daily_total), 0) FROM (SELECT SUM(score) as daily_total FROM battles WHERE email = %s AND timestamp >= %s GROUP BY DATE(timestamp)) sub', (email, seven_days_ago))
     avg = cur.fetchone()[0]
-    target = max(10, int(avg * 1.2) + 5)  # progressive overload
+    target = max(10, int(avg * 1.2) + 5)
     return jsonify({'target': target, 'todayDone': today_done})
 
 @app.route('/api/active_users')
@@ -233,7 +232,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (motivational banner + visible camera) ----------
+# ---------- Frontend (Epic Randomised Intro + All Features) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -264,72 +263,57 @@ FRONTEND_HTML = """
   .score-date{font-size:.75rem;color:#888;margin-left:6px}
   .result-msg{text-align:center;font-size:1.3rem;margin:12px 0;font-style:italic;color:#f0f}
   .small{font-size:.85rem;color:#aaa}.share-btn{background:#0ff;color:black}
-
-  /* ─────────── CAMERA FIX ─────────── */
-  video{width:100%;border-radius:14px;background:#000}
-  canvas{width:100%;border-radius:14px;background:transparent !important;pointer-events:none}
+  video,canvas{width:100%;border-radius:14px;background:#000}
   #aiCameraUI{position:relative;width:100%;height:250px;margin:10px 0;border-radius:14px;overflow:hidden;background:#000;display:block}
   #aiCameraUI video{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:3}
   #aiCameraUI canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2;background:transparent !important}
-  /* ───────────────────────────────── */
-
   .angle-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;font-weight:800;color:#0ff;text-shadow:0 0 30px cyan;pointer-events:none;z-index:5}
   .rep-flash{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:3rem;font-weight:800;color:#0f0;text-shadow:0 0 30px green;z-index:6;animation:fadeInOut .8s ease}
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.8);color:#fa0;padding:6px 12px;border-radius:8px;font-size:16px;font-weight:bold;z-index:7;pointer-events:none}
 
-  /* MOTIVATIONAL BANNER – auto‑dismiss after 6s */
-  .motivation-banner{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:95%;background:rgba(0,0,0,0.85);border:1px solid #ff4500;border-radius:10px;padding:10px 13px;text-align:center;font-size:0.8rem;color:#ccc;line-height:1.4;z-index:10;backdrop-filter:blur(6px);display:none}
-  .motivation-banner strong{color:#ff4500}
-  .fade-out{animation:fadeOutBanner 1s ease forwards}
-  @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
+  /* ---------- EPIC INTRO SCREEN ---------- */
+  .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+  .intro-content{position:relative;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .intro-tagline{position:absolute;bottom:15%;left:50%;transform:translateX(-50%);font-size:1.2rem;font-weight:bold;color:#fff;text-shadow:0 0 20px #ff00ff;letter-spacing:4px;text-align:center;width:90%;z-index:10}
+  .skip-btn{position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.1);color:#aaa;padding:6px 16px;border-radius:20px;font-size:0.8rem;cursor:pointer;z-index:999}
+  .intro-title{font-size:3.5rem;font-weight:900;color:transparent;background:linear-gradient(135deg,#ff4500,#ff00ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 30px #ff00ff);z-index:10;animation:titleEntrance 1s ease forwards}
+  @keyframes titleEntrance{0%{opacity:0;transform:scale(0.3) rotate(-10deg)}80%{opacity:1;transform:scale(1.05) rotate(2deg)}100%{opacity:1;transform:scale(1) rotate(0deg)}}
 
-  /* CEO Badge */
-  .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
-  .luffy-img{width:70px;height:70px;border-radius:50%;object-fit:cover;border:none;box-shadow:0 0 15px rgba(0,191,255,0.6),0 0 30px rgba(255,69,0,0.4)}
-  .ceo-label{font-size:.7rem;color:#ddd;margin-top:6px;background:rgba(0,0,0,0.7);padding:3px 10px;border-radius:12px;text-align:center}
-  .ceo-arrow{position:fixed;top:30px;right:90px;font-size:1.8rem;color:#fff;animation:arrowBounce .8s ease-in-out infinite;pointer-events:none;z-index:10000;filter:drop-shadow(0 0 6px rgba(255,255,255,0.8))}
-  @keyframes arrowBounce{0%,100%{transform:translateX(0)}50%{transform:translateX(8px)}}
+  /* SHIELD BASH */
+  .shield{font-size:6rem;animation:shieldBash 1.5s ease forwards;z-index:5}
+  .cracks{position:absolute;font-size:3rem;top:40%;left:50%;transform:translate(-50%,-50%);animation:crackAppear 1s 0.5s forwards;opacity:0}
+  @keyframes shieldBash{0%{transform:scale(0) rotate(0deg);opacity:0}40%{transform:scale(1.3) rotate(15deg);opacity:1}100%{transform:scale(1) rotate(0deg);opacity:1}}
+  @keyframes crackAppear{0%{opacity:0;transform:scale(0)}100%{opacity:1;transform:scale(1)}}
 
-  /* Active Users Pill */
-  .active-users-pill{position:fixed;top:15px;left:15px;z-index:10000;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);padding:6px 12px;border-radius:20px;border:1px solid rgba(0,255,255,0.4);box-shadow:0 0 12px rgba(0,255,255,0.3)}
-  .active-users-pill .user-icon{font-size:1.2rem;}
-  .active-users-pill .count{font-weight:bold;font-size:1rem;color:#0ff}
+  /* LIGHTNING */
+  .lightning{position:absolute;width:4px;height:80px;background:#0ff;animation:strike 0.6s ease forwards;opacity:0;box-shadow:0 0 20px #0ff}
+  .lightning:nth-child(1){top:20%;left:15%;animation-delay:0.1s}
+  .lightning:nth-child(2){top:30%;right:10%;animation-delay:0.3s}
+  .lightning:nth-child(3){top:50%;left:25%;animation-delay:0.5s}
+  .lightning:nth-child(4){top:60%;right:20%;animation-delay:0.7s}
+  @keyframes strike{0%{height:0;opacity:0}30%{opacity:1;height:80px}100%{opacity:0;height:0}}
 
-  /* CEO Modal */
-  .ceo-modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);z-index:20000;display:none;align-items:center;justify-content:center}
-  .ceo-modal-overlay.active{display:flex}
-  .ceo-modal{background:#1a1a1a;border-radius:24px;padding:30px 24px;max-width:320px;width:90%;text-align:center;border:1px solid rgba(0,255,255,.3);box-shadow:0 0 40px rgba(0,255,255,.2)}
-  .ceo-modal h2{font-size:1.6rem;margin:8px 0;background:linear-gradient(135deg,#ff4500,#00bfff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-  .ceo-modal .title{color:#fa0;font-weight:bold;margin-bottom:10px;font-size:.95rem}
-  .ceo-modal .phone{color:#0ff;font-size:1.3rem;margin:8px 0;font-weight:bold}
-  .close-btn{background:none;border:1px solid #555;color:#aaa;padding:6px 20px;border-radius:20px;margin-top:18px;cursor:pointer}
-  .wa-btn{display:inline-block;margin-top:12px;background:#25D366;color:#fff;padding:10px 18px;border-radius:25px;text-decoration:none;font-weight:bold;font-size:1rem;box-shadow:0 0 12px rgba(37,211,102,0.5)}
-  .wa-btn:hover{background:#1ebe5b}
+  /* FIRE RINGS */
+  .fire-ring{position:absolute;width:40px;height:40px;border-radius:50%;border:3px solid #ff4500;animation:fireExpand 1.5s ease forwards;opacity:0}
+  .fire-ring:nth-child(1){animation-delay:0.2s}
+  .fire-ring:nth-child(2){animation-delay:0.5s}
+  .fire-ring:nth-child(3){animation-delay:0.8s}
+  @keyframes fireExpand{0%{width:0;height:0;opacity:1;box-shadow:0 0 30px #ff4500}100%{width:300px;height:300px;opacity:0;box-shadow:0 0 60px #ff4500}}
+  .embers{position:absolute;width:8px;height:8px;border-radius:50%;background:#ff8c00;animation:floatUp 2s ease forwards;opacity:0}
+  @keyframes floatUp{0%{transform:translateY(0) scale(1);opacity:1}100%{transform:translateY(-200px) scale(0);opacity:0}}
 
-  /* Instruction screen */
-  .instruction-box{background:rgba(0,0,0,0.8);border-radius:20px;padding:20px;margin:20px 0}
-  .instruction-box p{font-size:1rem;line-height:1.8;margin:8px 0;color:#ddd}
-  .checkbox-row{display:flex;align-items:center;gap:12px;margin:20px 0;justify-content:center}
-  .checkbox-row input{width:20px;height:20px;accent-color:#ff4500}
-  .checkbox-row label{font-size:0.9rem;color:#ccc}
-
-  /* Stats Screen */
-  .stats-box{background:rgba(0,0,0,0.7);border-radius:16px;padding:16px;margin:10px 0}
-  .stats-row{display:flex;gap:12px;margin:10px 0}
-  .stats-card{flex:1;background:#1a1a1a;border-radius:12px;padding:12px;text-align:center}
-  .stats-card .big-num{font-size:2rem;font-weight:bold;color:#0ff}
-  .stats-card .label{font-size:0.75rem;color:#aaa}
-  .recent-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #333}
-  .plan-item{display:flex;justify-content:space-between;padding:6px 0;color:#ccc}
-
-  /* AI Assistant */
-  .ai-assistant{position:fixed;bottom:20px;right:20px;z-index:15000;background:linear-gradient(135deg,#ff4500,#ff00ff);color:#fff;padding:10px 16px;border-radius:20px;font-size:0.85rem;max-width:250px;box-shadow:0 0 20px rgba(255,0,255,0.4);cursor:pointer}
-  .ai-msg{display:block;line-height:1.4}
-  .ai-mute{position:absolute;top:-8px;right:-8px;background:#fff;color:#000;width:24px;height:24px;border-radius:50%;font-size:0.8rem;border:none;cursor:pointer}
+  /* General intro fadeout */
+  .intro-fadeout{animation:fadeOutIntro 0.8s ease forwards}
+  @keyframes fadeOutIntro{0%{opacity:1}100%{opacity:0;visibility:hidden}}
 </style>
 </head>
 <body>
+<!-- Epic Intro Overlay -->
+<div id="introOverlay" class="intro-overlay">
+  <div class="skip-btn" onclick="skipIntro()">Tap to skip →</div>
+  <div class="intro-content" id="introContent"></div>
+</div>
 
 <!-- ACTIVE USERS PILL -->
 <div class="active-users-pill" id="activeUsersPill">
@@ -354,7 +338,6 @@ FRONTEND_HTML = """
     <div style="color:#ccc;font-size:0.9rem;margin:6px 0">Have a query? Get in touch</div>
     <div class="phone">📞 8950592855</div>
     <div style="color:#aaa;font-size:0.7rem">Tap to call / message</div>
-    <!-- WhatsApp Message Button -->
     <a href="https://wa.me/918950592855?text=Hey%20Kaushtubh%2C%20I%20have%20a%20query%20about%20PushClash" target="_blank" class="wa-btn">📱 Message on WhatsApp</a>
     <button class="close-btn" onclick="document.getElementById('ceoModal').classList.remove('active')">Close</button>
   </div>
@@ -368,7 +351,7 @@ FRONTEND_HTML = """
 
 <div class="app-container" id="app">
   <!-- Setup Screen -->
-  <div id="setupScreen" class="screen active">
+  <div id="setupScreen" class="screen">
     <h1>PUSHCLASH</h1>
     <div class="arena-subtitle">⚔️ ENTER THE ARENA ⚔️</div>
     <div style="font-size:3rem;text-align:center;margin-bottom:10px">🛡️🔥🛡️</div>
@@ -445,7 +428,7 @@ FRONTEND_HTML = """
     <button class="btn-secondary" onclick="showScreen('dashboardScreen')">← Back to Arena</button>
   </div>
 
-  <!-- Challenge Screen (video now visible, motivational banner) -->
+  <!-- Challenge Screen -->
   <div id="challengeScreen" class="screen">
     <div id="countdownDisplay" class="timer-big" style="font-size:4rem">3</div>
     <div id="challengeActiveUI" style="display:none">
@@ -457,7 +440,6 @@ FRONTEND_HTML = """
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
         <div class="debug-msg" id="debugMsg"></div>
-        <!-- NEW MOTIVATIONAL BANNER -->
         <div class="motivation-banner" id="motivationBanner">
           <strong>👁️ THE AI IS WATCHING EVERY REP 👁️</strong><br>
           Start your push‑ups NOW! No distractions, no excuses — pure power only. The AI referee sees every move and counts every clean rep. Show the world what you’re made of! 💪🚀
@@ -494,12 +476,84 @@ FRONTEND_HTML = """
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
+  // ---------- Epic Intro ----------
+  const introScenes = [
+    { type: 'shield', tagline: 'DEFEND THE ARENA', emoji: '🛡️' },
+    { type: 'lightning', tagline: 'UNLEASH THE BEAST', emoji: '⚡' },
+    { type: 'fire', tagline: 'RISE TO GLORY', emoji: '🔥' }
+  ];
+
+  function pickRandomScene() {
+    const idx = Math.floor(Math.random() * introScenes.length);
+    return introScenes[idx];
+  }
+
+  function buildIntro(scene) {
+    const container = document.getElementById('introContent');
+    container.innerHTML = '';
+    let html = '';
+
+    if (scene.type === 'shield') {
+      html += '<div class="shield">🛡️</div>';
+      html += '<div class="cracks">💥</div>';
+    } else if (scene.type === 'lightning') {
+      for (let i=0; i<6; i++) {
+        html += `<div class="lightning" style="top:${10+Math.random()*60}%;left:${5+Math.random()*85}%;animation-delay:${Math.random()*0.6}s"></div>`;
+      }
+    } else if (scene.type === 'fire') {
+      for (let i=0; i<4; i++) {
+        html += `<div class="fire-ring" style="top:${30+Math.random()*30}%;left:${30+Math.random()*30}%"></div>`;
+      }
+      for (let i=0; i<20; i++) {
+        html += `<div class="embers" style="top:${50+Math.random()*40}%;left:${20+Math.random()*60}%;animation-delay:${Math.random()*1.5}s;animation-duration:${1.5+Math.random()*2}s"></div>`;
+      }
+    }
+
+    html += `<div class="intro-title">PUSHCLASH</div>`;
+    html += `<div class="intro-tagline">${scene.emoji} ${scene.tagline} ${scene.emoji}</div>`;
+    container.innerHTML = html;
+  }
+
+  function skipIntro() {
+    clearTimeout(window._introTimer);
+    const overlay = document.getElementById('introOverlay');
+    overlay.classList.add('intro-fadeout');
+    setTimeout(() => {
+      overlay.style.display = 'none';
+      proceedToApp();
+    }, 800);
+  }
+
+  function proceedToApp() {
+    if (currentUser) {
+      showScreen('dashboardScreen');
+      loadStats();
+    } else {
+      showScreen('setupScreen');
+    }
+  }
+
+  // Load user, then show intro
+  window.addEventListener('load', () => {
+    currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
+    const scene = pickRandomScene();
+    buildIntro(scene);
+    const overlay = document.getElementById('introOverlay');
+    overlay.style.display = 'flex';
+    window._introTimer = setTimeout(() => {
+      overlay.classList.add('intro-fadeout');
+      setTimeout(() => {
+        overlay.style.display = 'none';
+        proceedToApp();
+      }, 800);
+    }, 5000);
+  });
+
   // ---------- Active user count ----------
   async function refreshActiveCount() {
     try { const res = await fetch('/api/active_users'); const data = await res.json(); document.getElementById('activeUserCount').textContent = data.count; } catch(e) {}
   }
   setInterval(refreshActiveCount, 10000);
-  window.addEventListener('load', refreshActiveCount);
 
   // ---------- AI Assistant voice helpers ----------
   function speak(msg) {
@@ -546,7 +600,6 @@ FRONTEND_HTML = """
     } catch(e) { return { streak: 0, target: 10, done: 0 }; }
   }
 
-  // ---------- Voice welcome on dashboard ----------
   async function speakDashboardWelcome() {
     if (!currentUser) return;
     const { streak, target, done } = await updateDashboardInfo();
@@ -557,7 +610,6 @@ FRONTEND_HTML = """
     resetIdleTimer();
   }
 
-  // ---------- VOICE HELPERS (original) ----------
   function speakWelcome() {
     const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
     msg.lang = 'en-US'; msg.rate = 0.9; msg.pitch = 1.1;
@@ -613,7 +665,6 @@ FRONTEND_HTML = """
     refreshActiveCount();
   }
 
-  // ---------- STATS PAGE ----------
   async function showStats(){
     if(!currentUser) return;
     const res = await fetch('/api/stats', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email: currentUser.email})});
@@ -790,9 +841,6 @@ FRONTEND_HTML = """
     if(!data.length){ container.innerHTML = '<p style="text-align:center;color:#aaa">No battles yet.</p>'; return; }
     container.innerHTML = data.map((b,i)=>{ const emojis = ['🥇','🥈','🥉'], rankDisp = i<3 ? emojis[i] : `#${i+1}`; const dateStr = b.date ? ` <span class="score-date">${b.date}</span>` : ''; return `<div class="leaderboard-item"><span class="rank">${rankDisp}</span><span>${b.name}</span><span class="small">${b.nationality}</span><span class="score">${b.score}${dateStr}</span></div>`; }).join('');
   }
-
-  currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
-  if(currentUser){ showScreen('dashboardScreen'); loadStats(); } else { showScreen('setupScreen'); }
 </script>
 </body>
 </html>
