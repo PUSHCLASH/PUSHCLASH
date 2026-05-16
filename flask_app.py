@@ -232,7 +232,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Epic Randomised Intro + All Features) ----------
+# ---------- Frontend (Fixed intro, no vanishing) ----------
 FRONTEND_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -247,7 +247,8 @@ FRONTEND_HTML = """
 <style>
   *{margin:0;padding:0;box-sizing:border-box;font-family:'Poppins',sans-serif}
   body{background:#0a0a0a;color:#fff;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;background-image:radial-gradient(circle at 50% 50%,#1a1a1a 0%,#000 100%);overflow-x:hidden}
-  .app-container{max-width:450px;width:100%;background:#111;border-radius:28px;padding:24px 20px;box-shadow:0 0 40px rgba(255,0,255,.3),0 0 80px rgba(0,255,255,.2);border:1px solid rgba(0,255,255,.2);position:relative}
+  .app-container{max-width:450px;width:100%;background:#111;border-radius:28px;padding:24px 20px;box-shadow:0 0 40px rgba(255,0,255,.3),0 0 80px rgba(0,255,255,.2);border:1px solid rgba(0,255,255,.2);position:relative;display:none}
+  .app-container.visible{display:block}
   h1{text-align:center;font-size:2.8rem;background:linear-gradient(135deg,#ff5500,#ff00ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
   .arena-subtitle{text-align:center;color:#aaa;font-size:.9rem;margin-bottom:24px}
   .screen{display:none}.screen.active{display:block}
@@ -306,17 +307,50 @@ FRONTEND_HTML = """
   /* General intro fadeout */
   .intro-fadeout{animation:fadeOutIntro 0.8s ease forwards}
   @keyframes fadeOutIntro{0%{opacity:1}100%{opacity:0;visibility:hidden}}
+
+  /* Other styles unchanged */
+  .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
+  .luffy-img{width:70px;height:70px;border-radius:50%;object-fit:cover;border:none;box-shadow:0 0 15px rgba(0,191,255,0.6),0 0 30px rgba(255,69,0,0.4)}
+  .ceo-label{font-size:.7rem;color:#ddd;margin-top:6px;background:rgba(0,0,0,0.7);padding:3px 10px;border-radius:12px;text-align:center}
+  .ceo-arrow{position:fixed;top:30px;right:90px;font-size:1.8rem;color:#fff;animation:arrowBounce .8s ease-in-out infinite;pointer-events:none;z-index:10000;filter:drop-shadow(0 0 6px rgba(255,255,255,0.8))}
+  @keyframes arrowBounce{0%,100%{transform:translateX(0)}50%{transform:translateX(8px)}}
+  .active-users-pill{position:fixed;top:15px;left:15px;z-index:10000;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);padding:6px 12px;border-radius:20px;border:1px solid rgba(0,255,255,0.4);box-shadow:0 0 12px rgba(0,255,255,0.3)}
+  .active-users-pill .user-icon{font-size:1.2rem;}
+  .active-users-pill .count{font-weight:bold;font-size:1rem;color:#0ff}
+  .ceo-modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);z-index:20000;display:none;align-items:center;justify-content:center}
+  .ceo-modal-overlay.active{display:flex}
+  .ceo-modal{background:#1a1a1a;border-radius:24px;padding:30px 24px;max-width:320px;width:90%;text-align:center;border:1px solid rgba(0,255,255,.3);box-shadow:0 0 40px rgba(0,255,255,.2)}
+  .ceo-modal h2{font-size:1.6rem;margin:8px 0;background:linear-gradient(135deg,#ff4500,#00bfff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  .ceo-modal .title{color:#fa0;font-weight:bold;margin-bottom:10px;font-size:.95rem}
+  .ceo-modal .phone{color:#0ff;font-size:1.3rem;margin:8px 0;font-weight:bold}
+  .close-btn{background:none;border:1px solid #555;color:#aaa;padding:6px 20px;border-radius:20px;margin-top:18px;cursor:pointer}
+  .wa-btn{display:inline-block;margin-top:12px;background:#25D366;color:#fff;padding:10px 18px;border-radius:25px;text-decoration:none;font-weight:bold;font-size:1rem;box-shadow:0 0 12px rgba(37,211,102,0.5)}
+  .instruction-box{background:rgba(0,0,0,0.8);border-radius:20px;padding:20px;margin:20px 0}
+  .instruction-box p{font-size:1rem;line-height:1.8;margin:8px 0;color:#ddd}
+  .checkbox-row{display:flex;align-items:center;gap:12px;margin:20px 0;justify-content:center}
+  .checkbox-row input{width:20px;height:20px;accent-color:#ff4500}
+  .checkbox-row label{font-size:0.9rem;color:#ccc}
+  .stats-box{background:rgba(0,0,0,0.7);border-radius:16px;padding:16px;margin:10px 0}
+  .stats-row{display:flex;gap:12px;margin:10px 0}
+  .stats-card{flex:1;background:#1a1a1a;border-radius:12px;padding:12px;text-align:center}
+  .stats-card .big-num{font-size:2rem;font-weight:bold;color:#0ff}
+  .recent-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #333}
+  .plan-item{display:flex;justify-content:space-between;padding:6px 0;color:#ccc}
+  .ai-assistant{position:fixed;bottom:20px;right:20px;z-index:15000;background:linear-gradient(135deg,#ff4500,#ff00ff);color:#fff;padding:10px 16px;border-radius:20px;font-size:0.85rem;max-width:250px;box-shadow:0 0 20px rgba(255,0,255,0.4);cursor:pointer}
+  .ai-msg{display:block;line-height:1.4}
+  .ai-mute{position:absolute;top:-8px;right:-8px;background:#fff;color:#000;width:24px;height:24px;border-radius:50%;font-size:0.8rem;border:none;cursor:pointer}
 </style>
 </head>
 <body>
-<!-- Epic Intro Overlay -->
+
+<!-- EPIC INTRO (visible by default) -->
 <div id="introOverlay" class="intro-overlay">
   <div class="skip-btn" onclick="skipIntro()">Tap to skip →</div>
   <div class="intro-content" id="introContent"></div>
 </div>
 
-<!-- ACTIVE USERS PILL -->
-<div class="active-users-pill" id="activeUsersPill">
+<!-- ACTIVE USERS PILL (hidden behind intro, revealed after) -->
+<div class="active-users-pill" id="activeUsersPill" style="z-index:10000;">
   <span class="user-icon">👥</span>
   <span class="count" id="activeUserCount">0</span>
   <span style="font-size:0.8rem;color:#aaa">online</span>
@@ -349,7 +383,8 @@ FRONTEND_HTML = """
   <span class="ai-msg" id="aiMessage">💬 Loading your coach...</span>
 </div>
 
-<div class="app-container" id="app">
+<!-- Main App Container (hidden until intro finishes) -->
+<div class="app-container" id="appContainer">
   <!-- Setup Screen -->
   <div id="setupScreen" class="screen">
     <h1>PUSHCLASH</h1>
@@ -525,6 +560,10 @@ FRONTEND_HTML = """
   }
 
   function proceedToApp() {
+    // Make the app container visible
+    document.getElementById('appContainer').classList.add('visible');
+    // Decide which screen to show
+    currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
     if (currentUser) {
       showScreen('dashboardScreen');
       loadStats();
@@ -533,9 +572,8 @@ FRONTEND_HTML = """
     }
   }
 
-  // Load user, then show intro
+  // Start intro on page load
   window.addEventListener('load', () => {
-    currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
     const scene = pickRandomScene();
     buildIntro(scene);
     const overlay = document.getElementById('introOverlay');
@@ -679,7 +717,6 @@ FRONTEND_HTML = """
     showScreen('statsScreen');
   }
 
-  // ---------- CHALLENGE START ----------
   async function startChallenge(mode){
     challengeMode = mode;
     showScreen('challengeScreen');
