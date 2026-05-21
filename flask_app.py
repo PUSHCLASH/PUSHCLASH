@@ -152,7 +152,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Gear 5 Image Intro) ----------
+# ---------- Frontend (Fire & Ice Combo Intro) ----------
 FRONTEND_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -197,21 +197,30 @@ FRONTEND_HTML = r"""
   .fade-out{animation:fadeOutBanner 1s ease forwards}
   @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
 
-  /* ───────── GEAR 5 IMAGE INTRO ───────── */
+  /* ───────── FIRE & ICE COMBO INTRO ───────── */
   .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:radial-gradient(circle at 50% 40%, #1a1025 0%, #000 100%);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
-  .intro-scene{position:relative;display:flex;flex-direction:column;align-items:center}
-  
-  /* Luffy image container */
+  .intro-scene{display:flex;flex-direction:column;align-items:center;justify-content:space-between;height:100%;width:100%;padding:60px 20px 40px}
+
+  /* Title at top */
+  .intro-title-top{text-align:center;z-index:10}
+  .intro-title-main{font-size:3rem;font-weight:900;color:transparent;background:linear-gradient(135deg,#ff4500,#ff00ff,#ff4500);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 25px #ff00ff);animation:titleGlow 2s ease-in-out infinite, titleEntrance 0.8s ease forwards}
+
+  /* Luffy image container with fire/ice rings */
   .luffy-image-container{position:relative;width:200px;height:200px;display:flex;align-items:center;justify-content:center;z-index:2}
   .luffy-image{width:180px;height:180px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.2);box-shadow:0 0 30px #ff4500, 0 0 60px #ff00ff, 0 0 80px rgba(255,100,0,0.5);animation:gearEntrance 1.2s ease forwards, pulseGlow 2s 1.2s ease-in-out infinite}
+
+  /* Fire ring */
+  .fire-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:220px;height:220px;border-radius:50%;border:3px dashed #ff4500;box-shadow:0 0 20px #ff4500, 0 0 40px rgba(255,69,0,0.5);animation:spinFire 3s linear infinite}
+  /* Ice ring */
+  .ice-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:190px;height:190px;border-radius:50%;border:3px dashed #00bfff;box-shadow:0 0 20px #00bfff, 0 0 40px rgba(0,191,255,0.5);animation:spinIce 3.5s linear infinite reverse}
+
+  @keyframes spinFire{0%{transform:translate(-50%,-50%) rotate(0deg)}100%{transform:translate(-50%,-50%) rotate(360deg)}}
+  @keyframes spinIce{0%{transform:translate(-50%,-50%) rotate(0deg)}100%{transform:translate(-50%,-50%) rotate(-360deg)}}
   @keyframes gearEntrance{0%{transform:scale(0) rotate(-20deg);opacity:0}80%{transform:scale(1.05) rotate(5deg);opacity:1}100%{transform:scale(1) rotate(0deg);opacity:1}}
   @keyframes pulseGlow{0%,100%{box-shadow:0 0 30px #ff4500,0 0 60px #ff00ff,0 0 80px rgba(255,100,0,0.5)}50%{box-shadow:0 0 50px #ff4500,0 0 90px #ff00ff,0 0 120px rgba(255,100,0,0.9)}}
-  
-  /* Rotating gear ring around image */
-  .gear-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:220px;height:220px;border-radius:50%;border:4px dashed rgba(0,255,255,0.4);animation:spinRing 4s linear infinite;z-index:1}
-  .gear-ring-inner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:190px;height:190px;border-radius:50%;border:2px dotted rgba(255,100,0,0.3);animation:spinRing 3s linear infinite reverse;z-index:1}
-  @keyframes spinRing{0%{transform:translate(-50%,-50%) rotate(0deg)}100%{transform:translate(-50%,-50%) rotate(360deg)}}
-  
+  @keyframes titleGlow{0%,100%{filter:drop-shadow(0 0 25px #ff00ff)}50%{filter:drop-shadow(0 0 45px #ff4500) drop-shadow(0 0 60px #ff00ff)}}
+  @keyframes titleEntrance{0%{opacity:0;transform:translateY(-20px) scale(0.7)}100%{opacity:1;transform:translateY(0) scale(1)}}
+
   /* Floating particles */
   .particle{position:absolute;width:8px;height:8px;border-radius:50%;background:#ff4500;animation:floatParticle 2.5s ease-in-out infinite;opacity:0;z-index:0}
   .particle:nth-child(1){top:20%;left:15%;animation-delay:0s;background:#ff00ff}
@@ -223,15 +232,11 @@ FRONTEND_HTML = r"""
   .particle:nth-child(7){top:70%;left:18%;animation-delay:0.3s;background:#0ff}
   .particle:nth-child(8){top:75%;right:15%;animation-delay:1.8s;background:#ff4500}
   @keyframes floatParticle{0%{opacity:0;transform:translateY(0) scale(0)}30%{opacity:1;transform:translateY(-20px) scale(1)}100%{opacity:0;transform:translateY(40px) scale(0.5)}}
-  
-  /* Title */
-  .intro-title{position:absolute;bottom:12%;left:50%;transform:translateX(-50%);z-index:10;text-align:center}
-  .intro-title-main{font-size:3.2rem;font-weight:900;color:transparent;background:linear-gradient(135deg,#ff4500,#ff00ff,#ff4500);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 25px #ff00ff);animation:titleGlow 2s ease-in-out infinite, titleEntrance 0.8s ease forwards}
-  @keyframes titleEntrance{0%{opacity:0;transform:translateY(30px) scale(0.7)}100%{opacity:1;transform:translateY(0) scale(1)}}
-  @keyframes titleGlow{0%,100%{filter:drop-shadow(0 0 25px #ff00ff)}50%{filter:drop-shadow(0 0 45px #ff4500) drop-shadow(0 0 60px #ff00ff)}}
-  .intro-tagline{font-size:0.95rem;color:#ccc;margin-top:8px;letter-spacing:3px;animation:tagAppear 1s 0.5s ease forwards;opacity:0}
+
+  /* Tagline at bottom */
+  .intro-tagline{font-size:1rem;color:#ccc;letter-spacing:3px;animation:tagAppear 1s 0.5s ease forwards;opacity:0;text-align:center;margin-top:10px}
   @keyframes tagAppear{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
-  
+
   .skip-btn{position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.1);color:#aaa;padding:6px 16px;border-radius:20px;font-size:0.8rem;cursor:pointer;z-index:999}
   .intro-fadeout{animation:fadeOutIntro 0.8s ease forwards}
   @keyframes fadeOutIntro{0%{opacity:1}100%{opacity:0;visibility:hidden}}
@@ -271,25 +276,26 @@ FRONTEND_HTML = r"""
 </head>
 <body>
 
-<!-- GEAR 5 IMAGE INTRO -->
+<!-- FIRE & ICE COMBO INTRO -->
 <div id="introOverlay" class="intro-overlay">
   <div class="skip-btn" onclick="skipIntro()">Tap to skip →</div>
   <div class="intro-scene">
-    <!-- Floating particles -->
-    <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
-    <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
-    
-    <!-- Luffy Gear 5 image with rotating rings -->
-    <div class="luffy-image-container">
-      <div class="gear-ring"></div>
-      <div class="gear-ring-inner"></div>
-      <img class="luffy-image" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
+    <!-- Title at top -->
+    <div class="intro-title-top">
+      <div class="intro-title-main">PUSHCLASH</div>
     </div>
-  </div>
-  
-  <!-- Title -->
-  <div class="intro-title">
-    <div class="intro-title-main">PUSHCLASH</div>
+
+    <!-- Luffy Gear 5 image with fire/ice rings -->
+    <div class="luffy-image-container">
+      <div class="fire-ring"></div>
+      <div class="ice-ring"></div>
+      <img class="luffy-image" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
+      <!-- Floating particles -->
+      <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
+      <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
+    </div>
+
+    <!-- Tagline at bottom -->
     <div class="intro-tagline">⚡ GEAR 5 — AWAKENED ⚡</div>
   </div>
 </div>
