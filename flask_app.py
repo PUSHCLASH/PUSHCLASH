@@ -152,7 +152,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Gear Second Pose Intro) ----------
+# ---------- Frontend (Gear 5 Image Intro) ----------
 FRONTEND_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -197,41 +197,38 @@ FRONTEND_HTML = r"""
   .fade-out{animation:fadeOutBanner 1s ease forwards}
   @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
 
-  /* ───────── GEAR SECOND INTRO ───────── */
-  .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:radial-gradient(circle at 50% 30%, #1a1a3e 0%, #000 100%);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
-  .intro-scene{position:relative;width:280px;height:320px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
+  /* ───────── GEAR 5 IMAGE INTRO ───────── */
+  .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:radial-gradient(circle at 50% 40%, #1a1025 0%, #000 100%);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+  .intro-scene{position:relative;display:flex;flex-direction:column;align-items:center}
   
-  /* Luffy's body – SVG silhouette */
-  .luffy-pose{position:relative;width:220px;height:260px;z-index:2}
-  .luffy-pose svg{width:100%;height:100%;filter:drop-shadow(0 0 20px rgba(255,100,0,0.5))}
+  /* Luffy image container */
+  .luffy-image-container{position:relative;width:200px;height:200px;display:flex;align-items:center;justify-content:center;z-index:2}
+  .luffy-image{width:180px;height:180px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.2);box-shadow:0 0 30px #ff4500, 0 0 60px #ff00ff, 0 0 80px rgba(255,100,0,0.5);animation:gearEntrance 1.2s ease forwards, pulseGlow 2s 1.2s ease-in-out infinite}
+  @keyframes gearEntrance{0%{transform:scale(0) rotate(-20deg);opacity:0}80%{transform:scale(1.05) rotate(5deg);opacity:1}100%{transform:scale(1) rotate(0deg);opacity:1}}
+  @keyframes pulseGlow{0%,100%{box-shadow:0 0 30px #ff4500,0 0 60px #ff00ff,0 0 80px rgba(255,100,0,0.5)}50%{box-shadow:0 0 50px #ff4500,0 0 90px #ff00ff,0 0 120px rgba(255,100,0,0.9)}}
   
-  /* Steam particles */
-  .steam{position:absolute;width:6px;height:15px;background:rgba(255,255,255,0.6);border-radius:50%;animation:steamRise 1.8s ease-out infinite;z-index:1}
-  .steam:nth-child(1){top:45%;left:20%;animation-delay:0s}
-  .steam:nth-child(2){top:40%;left:35%;animation-delay:0.4s}
-  .steam:nth-child(3){top:48%;left:55%;animation-delay:0.8s}
-  .steam:nth-child(4){top:35%;left:70%;animation-delay:1.2s}
-  .steam:nth-child(5){top:50%;left:80%;animation-delay:0.6s}
-  .steam:nth-child(6){top:42%;left:15%;animation-delay:1.0s}
-  .steam:nth-child(7){top:38%;left:60%;animation-delay:1.5s}
-  .steam:nth-child(8){top:46%;left:90%;animation-delay:0.3s}
-  @keyframes steamRise{0%{transform:translateY(0) scale(1);opacity:0.8}100%{transform:translateY(-120px) scale(2.5);opacity:0}}
+  /* Rotating gear ring around image */
+  .gear-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:220px;height:220px;border-radius:50%;border:4px dashed rgba(0,255,255,0.4);animation:spinRing 4s linear infinite;z-index:1}
+  .gear-ring-inner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:190px;height:190px;border-radius:50%;border:2px dotted rgba(255,100,0,0.3);animation:spinRing 3s linear infinite reverse;z-index:1}
+  @keyframes spinRing{0%{transform:translate(-50%,-50%) rotate(0deg)}100%{transform:translate(-50%,-50%) rotate(360deg)}}
   
-  /* Ground crack lines */
-  .ground-crack{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);width:180px;height:2px;background:linear-gradient(90deg,transparent,#ff4500,transparent);animation:crackPulse 2s ease-in-out infinite;z-index:0;border-radius:50%}
-  .ground-crack:nth-child(2){width:120px;bottom:26px;animation-delay:0.5s;opacity:0.5}
-  @keyframes crackPulse{0%,100%{opacity:0.3;transform:translateX(-50%) scaleX(0.8)}50%{opacity:1;transform:translateX(-50%) scaleX(1)}}
-  
-  /* Impact ring */
-  .impact-ring{position:absolute;bottom:28px;left:50%;transform:translateX(-50%);width:60px;height:8px;border:2px solid rgba(255,69,0,0.6);border-radius:50%;animation:ringExpand 2s ease-out infinite;z-index:0}
-  @keyframes ringExpand{0%{width:60px;opacity:0.8}100%{width:200px;opacity:0}}
+  /* Floating particles */
+  .particle{position:absolute;width:8px;height:8px;border-radius:50%;background:#ff4500;animation:floatParticle 2.5s ease-in-out infinite;opacity:0;z-index:0}
+  .particle:nth-child(1){top:20%;left:15%;animation-delay:0s;background:#ff00ff}
+  .particle:nth-child(2){top:25%;right:12%;animation-delay:0.5s}
+  .particle:nth-child(3){top:55%;left:8%;animation-delay:1s;background:#0ff}
+  .particle:nth-child(4){top:60%;right:10%;animation-delay:1.5s;background:#ff4500}
+  .particle:nth-child(5){top:40%;left:25%;animation-delay:0.8s;background:#ff00ff}
+  .particle:nth-child(6){top:45%;right:20%;animation-delay:1.2s}
+  .particle:nth-child(7){top:70%;left:18%;animation-delay:0.3s;background:#0ff}
+  .particle:nth-child(8){top:75%;right:15%;animation-delay:1.8s;background:#ff4500}
+  @keyframes floatParticle{0%{opacity:0;transform:translateY(0) scale(0)}30%{opacity:1;transform:translateY(-20px) scale(1)}100%{opacity:0;transform:translateY(40px) scale(0.5)}}
   
   /* Title */
-  .intro-title{position:absolute;bottom:15%;left:50%;transform:translateX(-50%);z-index:10;text-align:center}
+  .intro-title{position:absolute;bottom:12%;left:50%;transform:translateX(-50%);z-index:10;text-align:center}
   .intro-title-main{font-size:3.2rem;font-weight:900;color:transparent;background:linear-gradient(135deg,#ff4500,#ff00ff,#ff4500);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 25px #ff00ff);animation:titleGlow 2s ease-in-out infinite, titleEntrance 0.8s ease forwards}
   @keyframes titleEntrance{0%{opacity:0;transform:translateY(30px) scale(0.7)}100%{opacity:1;transform:translateY(0) scale(1)}}
   @keyframes titleGlow{0%,100%{filter:drop-shadow(0 0 25px #ff00ff)}50%{filter:drop-shadow(0 0 45px #ff4500) drop-shadow(0 0 60px #ff00ff)}}
-  
   .intro-tagline{font-size:0.95rem;color:#ccc;margin-top:8px;letter-spacing:3px;animation:tagAppear 1s 0.5s ease forwards;opacity:0}
   @keyframes tagAppear{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
   
@@ -274,71 +271,26 @@ FRONTEND_HTML = r"""
 </head>
 <body>
 
-<!-- GEAR SECOND INTRO -->
+<!-- GEAR 5 IMAGE INTRO -->
 <div id="introOverlay" class="intro-overlay">
   <div class="skip-btn" onclick="skipIntro()">Tap to skip →</div>
   <div class="intro-scene">
-    <!-- Steam particles -->
-    <div class="steam"></div><div class="steam"></div><div class="steam"></div><div class="steam"></div>
-    <div class="steam"></div><div class="steam"></div><div class="steam"></div><div class="steam"></div>
+    <!-- Floating particles -->
+    <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
+    <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
     
-    <!-- LUFFY GEAR SECOND POSE – SVG silhouette -->
-    <div class="luffy-pose">
-      <svg viewBox="0 0 300 380" xmlns="http://www.w3.org/2000/svg">
-        <!-- Body: leaning forward in Gear Second stance -->
-        <!-- Left leg (back, planted) -->
-        <ellipse cx="210" cy="310" rx="25" ry="12" fill="#1a1a2e" stroke="#fff" stroke-width="1.5"/>
-        <path d="M210 310 L195 270 L185 240" stroke="#1a1a2e" stroke-width="18" stroke-linecap="round"/>
-        <!-- Right leg (forward, bent) -->
-        <path d="M150 340 L140 300 L120 280" stroke="#1a1a2e" stroke-width="18" stroke-linecap="round"/>
-        <ellipse cx="120" cy="280" rx="22" ry="10" fill="#1a1a2e" stroke="#fff" stroke-width="1.5"/>
-        
-        <!-- Torso -->
-        <path d="M170 240 Q160 200 155 170 Q150 140 160 110" stroke="#1a1a2e" stroke-width="28" stroke-linecap="round"/>
-        
-        <!-- Straw hat on back -->
-        <ellipse cx="185" cy="165" rx="40" ry="8" fill="#d4a017" stroke="#b8860b" stroke-width="2" transform="rotate(-20,185,165)"/>
-        <ellipse cx="185" cy="160" rx="28" ry="12" fill="#e8c44a" stroke="#b8860b" stroke-width="1.5" transform="rotate(-20,185,160)"/>
-        <path d="M157 158 Q185 145 213 158" stroke="#b8860b" stroke-width="2" fill="#d4a017"/>
-        <!-- Hat ribbon -->
-        <path d="M160 162 Q185 150 210 162" stroke="#cc0000" stroke-width="4" fill="none"/>
-        
-        <!-- Right arm – fist on the ground -->
-        <path d="M158 115 Q130 140 95 200 Q75 240 70 265" stroke="#1a1a2e" stroke-width="14" stroke-linecap="round"/>
-        <!-- Right fist -->
-        <ellipse cx="70" cy="270" rx="16" ry="12" fill="#1a1a2e" stroke="#fff" stroke-width="1.5"/>
-        <!-- Steam from fist hitting ground -->
-        <circle cx="55" cy="260" r="4" fill="rgba(255,200,100,0.6)"/><circle cx="85" cy="255" r="3" fill="rgba(255,200,100,0.4)"/>
-        
-        <!-- Left arm – hand on knee -->
-        <path d="M158 115 Q180 140 175 180 Q170 210 155 235" stroke="#1a1a2e" stroke-width="14" stroke-linecap="round"/>
-        <ellipse cx="152" cy="240" rx="14" ry="10" fill="#1a1a2e" stroke="#fff" stroke-width="1.5"/>
-        
-        <!-- Head -->
-        <circle cx="155" cy="90" r="30" fill="#1a1a2e" stroke="#fff" stroke-width="2"/>
-        <!-- Hair spikes -->
-        <path d="M130 70 L120 45 L135 60" fill="#1a1a2e" stroke="#fff" stroke-width="1.5"/>
-        <path d="M140 63 L135 35 L148 55" fill="#1a1a2e" stroke="#fff" stroke-width="1.5"/>
-        <path d="M155 60 L155 30 L165 52" fill="#1a1a2e" stroke="#fff" stroke-width="1.5"/>
-        <path d="M168 60 L175 32 L178 55" fill="#1a1a2e" stroke="#fff" stroke-width="1.5"/>
-        <path d="M178 70 L192 48 L185 65" fill="#1a1a2e" stroke="#fff" stroke-width="1.5"/>
-        <!-- Eyes -->
-        <circle cx="143" cy="88" r="3" fill="#fff"/><circle cx="167" cy="88" r="3" fill="#fff"/>
-        <!-- Mouth -->
-        <path d="M148 102 Q155 108 162 102" stroke="#fff" stroke-width="1.5" fill="none"/>
-      </svg>
+    <!-- Luffy Gear 5 image with rotating rings -->
+    <div class="luffy-image-container">
+      <div class="gear-ring"></div>
+      <div class="gear-ring-inner"></div>
+      <img class="luffy-image" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
     </div>
-    
-    <!-- Ground impact effects -->
-    <div class="impact-ring"></div>
-    <div class="ground-crack"></div>
-    <div class="ground-crack"></div>
   </div>
   
   <!-- Title -->
   <div class="intro-title">
     <div class="intro-title-main">PUSHCLASH</div>
-    <div class="intro-tagline">⚡ GEAR SECOND – ACTIVATED ⚡</div>
+    <div class="intro-tagline">⚡ GEAR 5 — AWAKENED ⚡</div>
   </div>
 </div>
 
