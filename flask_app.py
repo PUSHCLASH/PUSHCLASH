@@ -152,7 +152,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Fire & Ice Combo Intro) ----------
+# ---------- Frontend (Clean, Advanced Gear 5 Intro) ----------
 FRONTEND_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -197,41 +197,33 @@ FRONTEND_HTML = r"""
   .fade-out{animation:fadeOutBanner 1s ease forwards}
   @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
 
-  /* ───────── FIRE & ICE COMBO INTRO ───────── */
-  .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:radial-gradient(circle at 50% 40%, #1a1025 0%, #000 100%);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+  /* ───────── ADVANCED GEAR 5 INTRO (no rings) ───────── */
+  .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:radial-gradient(circle at 50% 40%, #0d071a 0%, #000 100%);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
   .intro-scene{display:flex;flex-direction:column;align-items:center;justify-content:space-between;height:100%;width:100%;padding:60px 20px 40px}
 
-  /* Title at top */
+  /* Title at top – clean but powerful */
   .intro-title-top{text-align:center;z-index:10}
-  .intro-title-main{font-size:3rem;font-weight:900;color:transparent;background:linear-gradient(135deg,#ff4500,#ff00ff,#ff4500);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 25px #ff00ff);animation:titleGlow 2s ease-in-out infinite, titleEntrance 0.8s ease forwards}
+  .intro-title-main{font-size:3.2rem;font-weight:900;color:transparent;background:linear-gradient(135deg,#ff4500,#ff00ff,#ff4500);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 25px #ff00ff);animation:titleGlow 2s ease-in-out infinite, titleEntrance 0.8s ease forwards}
 
-  /* Luffy image container with fire/ice rings */
-  .luffy-image-container{position:relative;width:200px;height:200px;display:flex;align-items:center;justify-content:center;z-index:2}
-  .luffy-image{width:180px;height:180px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.2);box-shadow:0 0 30px #ff4500, 0 0 60px #ff00ff, 0 0 80px rgba(255,100,0,0.5);animation:gearEntrance 1.2s ease forwards, pulseGlow 2s 1.2s ease-in-out infinite}
-
-  /* Fire ring */
-  .fire-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:220px;height:220px;border-radius:50%;border:3px dashed #ff4500;box-shadow:0 0 20px #ff4500, 0 0 40px rgba(255,69,0,0.5);animation:spinFire 3s linear infinite}
-  /* Ice ring */
-  .ice-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:190px;height:190px;border-radius:50%;border:3px dashed #00bfff;box-shadow:0 0 20px #00bfff, 0 0 40px rgba(0,191,255,0.5);animation:spinIce 3.5s linear infinite reverse}
-
-  @keyframes spinFire{0%{transform:translate(-50%,-50%) rotate(0deg)}100%{transform:translate(-50%,-50%) rotate(360deg)}}
-  @keyframes spinIce{0%{transform:translate(-50%,-50%) rotate(0deg)}100%{transform:translate(-50%,-50%) rotate(-360deg)}}
-  @keyframes gearEntrance{0%{transform:scale(0) rotate(-20deg);opacity:0}80%{transform:scale(1.05) rotate(5deg);opacity:1}100%{transform:scale(1) rotate(0deg);opacity:1}}
-  @keyframes pulseGlow{0%,100%{box-shadow:0 0 30px #ff4500,0 0 60px #ff00ff,0 0 80px rgba(255,100,0,0.5)}50%{box-shadow:0 0 50px #ff4500,0 0 90px #ff00ff,0 0 120px rgba(255,100,0,0.9)}}
+  /* Luffy image – premium cinematic entrance */
+  .luffy-image-container{position:relative;width:220px;height:220px;display:flex;align-items:center;justify-content:center;z-index:2}
+  .luffy-image{width:190px;height:190px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.15);box-shadow:0 0 40px rgba(255,69,0,0.4), 0 0 80px rgba(255,0,255,0.3), 0 0 120px rgba(255,100,0,0.2);animation:cinematicEntrance 1.4s ease forwards, cinematicPulse 2.5s 1.4s ease-in-out infinite}
+  @keyframes cinematicEntrance{0%{transform:scale(0.3) translateY(30px);opacity:0;filter:brightness(0.3)}60%{transform:scale(1.05) translateY(-5px);opacity:1;filter:brightness(1.2)}100%{transform:scale(1) translateY(0);opacity:1;filter:brightness(1)}}
+  @keyframes cinematicPulse{0%,100%{box-shadow:0 0 40px rgba(255,69,0,0.4),0 0 80px rgba(255,0,255,0.3),0 0 120px rgba(255,100,0,0.2)}50%{box-shadow:0 0 60px rgba(255,69,0,0.7),0 0 100px rgba(255,0,255,0.5),0 0 140px rgba(255,100,0,0.4)}}
   @keyframes titleGlow{0%,100%{filter:drop-shadow(0 0 25px #ff00ff)}50%{filter:drop-shadow(0 0 45px #ff4500) drop-shadow(0 0 60px #ff00ff)}}
   @keyframes titleEntrance{0%{opacity:0;transform:translateY(-20px) scale(0.7)}100%{opacity:1;transform:translateY(0) scale(1)}}
 
-  /* Floating particles */
-  .particle{position:absolute;width:8px;height:8px;border-radius:50%;background:#ff4500;animation:floatParticle 2.5s ease-in-out infinite;opacity:0;z-index:0}
-  .particle:nth-child(1){top:20%;left:15%;animation-delay:0s;background:#ff00ff}
-  .particle:nth-child(2){top:25%;right:12%;animation-delay:0.5s}
-  .particle:nth-child(3){top:55%;left:8%;animation-delay:1s;background:#0ff}
-  .particle:nth-child(4){top:60%;right:10%;animation-delay:1.5s;background:#ff4500}
-  .particle:nth-child(5){top:40%;left:25%;animation-delay:0.8s;background:#ff00ff}
-  .particle:nth-child(6){top:45%;right:20%;animation-delay:1.2s}
-  .particle:nth-child(7){top:70%;left:18%;animation-delay:0.3s;background:#0ff}
-  .particle:nth-child(8){top:75%;right:15%;animation-delay:1.8s;background:#ff4500}
-  @keyframes floatParticle{0%{opacity:0;transform:translateY(0) scale(0)}30%{opacity:1;transform:translateY(-20px) scale(1)}100%{opacity:0;transform:translateY(40px) scale(0.5)}}
+  /* Refined floating particles */
+  .particle{position:absolute;width:4px;height:4px;border-radius:50%;background:#ff4500;animation:floatParticle 3s ease-in-out infinite;opacity:0;z-index:0}
+  .particle:nth-child(1){top:15%;left:12%;animation-delay:0s;background:#ff00ff;width:5px;height:5px}
+  .particle:nth-child(2){top:22%;right:10%;animation-delay:0.6s}
+  .particle:nth-child(3){top:50%;left:6%;animation-delay:1.1s;background:#0ff;width:6px;height:6px}
+  .particle:nth-child(4){top:58%;right:8%;animation-delay:1.6s;background:#ff4500}
+  .particle:nth-child(5){top:38%;left:22%;animation-delay:0.9s;background:#ff00ff;width:5px;height:5px}
+  .particle:nth-child(6){top:42%;right:18%;animation-delay:1.3s}
+  .particle:nth-child(7){top:68%;left:16%;animation-delay:0.4s;background:#0ff;width:4px;height:4px}
+  .particle:nth-child(8){top:72%;right:12%;animation-delay:1.9s;background:#ff4500}
+  @keyframes floatParticle{0%{opacity:0;transform:translateY(0) scale(0)}30%{opacity:0.8;transform:translateY(-25px) scale(1)}100%{opacity:0;transform:translateY(50px) scale(0.3)}}
 
   /* Tagline at bottom */
   .intro-tagline{font-size:1rem;color:#ccc;letter-spacing:3px;animation:tagAppear 1s 0.5s ease forwards;opacity:0;text-align:center;margin-top:10px}
@@ -276,7 +268,7 @@ FRONTEND_HTML = r"""
 </head>
 <body>
 
-<!-- FIRE & ICE COMBO INTRO -->
+<!-- ADVANCED GEAR 5 INTRO -->
 <div id="introOverlay" class="intro-overlay">
   <div class="skip-btn" onclick="skipIntro()">Tap to skip →</div>
   <div class="intro-scene">
@@ -285,10 +277,8 @@ FRONTEND_HTML = r"""
       <div class="intro-title-main">PUSHCLASH</div>
     </div>
 
-    <!-- Luffy Gear 5 image with fire/ice rings -->
+    <!-- Luffy Gear 5 image (no rings) -->
     <div class="luffy-image-container">
-      <div class="fire-ring"></div>
-      <div class="ice-ring"></div>
       <img class="luffy-image" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
       <!-- Floating particles -->
       <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
