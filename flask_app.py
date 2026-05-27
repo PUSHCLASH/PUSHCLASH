@@ -152,12 +152,10 @@ def weekly_plan():
     email = request.args.get('email','').strip()
     if not email: return jsonify({'days':[], 'weekStart':'', 'weekEnd':''})
     cur = get_db().cursor()
-    # Determine current week (Monday to Sunday)
     today = datetime.now(timezone.utc).date()
-    monday = today - timedelta(days=today.weekday())  # Monday
+    monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
 
-    # Get daily totals for each day of the week
     cur.execute("""
         SELECT DATE(timestamp) as day, SUM(score) as total
         FROM battles
@@ -166,7 +164,6 @@ def weekly_plan():
     """, (email, monday.isoformat(), (sunday+timedelta(days=1)).isoformat()))
     daily_data = {row['day']: row['total'] for row in cur.fetchall()}
 
-    # Calculate average daily push-ups from last 7 days for target
     seven_days_ago = today - timedelta(days=7)
     cur.execute("""
         SELECT COALESCE(AVG(daily_total),0)
@@ -185,7 +182,6 @@ def weekly_plan():
     for i in range(7):
         day_date = monday + timedelta(days=i)
         day_name = days_names[i]
-        # Wednesday and Sunday are rest days
         is_rest = (day_name == 'Wed' or day_name == 'Sun')
         target = 0 if is_rest else base_target
         done = int(daily_data.get(day_date, 0))
@@ -228,7 +224,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Advanced Weekly Plan + Ghost + All) ----------
+# ---------- Frontend (fixed weekly plan loading) ----------
 FRONTEND_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -273,13 +269,11 @@ FRONTEND_HTML = r"""
   .fade-out{animation:fadeOutBanner 1s ease forwards}
   @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
 
-  /* Ghost overlay */
   .ghost-overlay{position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.7);padding:8px 14px;border-radius:12px;font-size:1.2rem;z-index:8;display:none}
   .ghost-overlay .ghost-icon{font-size:1.5rem}
   .ghost-overlay .ghost-count{font-weight:bold;color:#aaa;margin-left:5px}
-  .ghost-beaten{color:#0f0 !important;animation:beatPulse 0.6s ease}
+  .ghost-beaten{color:#0f0 !important}
 
-  /* Intro (unchanged) */
   .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:radial-gradient(circle at 50% 40%, #0d071a 0%, #000 100%);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
   .intro-scene{display:flex;flex-direction:column;align-items:center;justify-content:space-between;height:100%;width:100%;padding:60px 20px 40px}
   .intro-title-top{text-align:center;z-index:10}
