@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import psycopg2
 import psycopg2.extras
 from datetime import datetime, timedelta, timezone
@@ -46,10 +47,12 @@ def init_db():
         cur = get_db().cursor()
         cur.execute('''CREATE TABLE IF NOT EXISTS battles (
             id SERIAL PRIMARY KEY, name TEXT NOT NULL, nationality TEXT NOT NULL,
-            email TEXT NOT NULL, score INTEGER NOT NULL, timestamp TIMESTAMPTZ DEFAULT NOW())''')
+            email TEXT NOT NULL, score INTEGER NOT NULL, timestamp TIMESTAMPTZ DEFAULT NOW(),
+            ghost_data JSONB
+        )''')
         get_db().commit()
 
-# ---------- API (unchanged) ----------
+# ---------- API ----------
 @app.route('/api/check-email', methods=['POST'])
 def check_email():
     email = request.get_json().get('email','').strip()
@@ -62,11 +65,27 @@ def check_email():
 def record_battle():
     d = request.get_json()
     n, nat, em, sc = d.get('name','').strip(), d.get('nationality','').strip(), d.get('email','').strip(), int(d.get('score',0))
+    ghost = d.get('ghost_timestamps', None)  # array of rep timestamps in seconds
     if not n or not nat or not em or sc<=0: return jsonify({'error':'Invalid data'}),400
     cur = get_db().cursor()
-    cur.execute('INSERT INTO battles (name,nationality,email,score) VALUES (%s,%s,%s,%s)',(n,nat,em,sc))
+    cur.execute(
+        'INSERT INTO battles (name,nationality,email,score,ghost_data) VALUES (%s,%s,%s,%s,%s)',
+        (n, nat, em, sc, json.dumps(ghost) if ghost else None)
+    )
     get_db().commit()
     return jsonify({'status':'ok'})
+
+@app.route('/api/ghost')
+def ghost():
+    email = request.args.get('email','').strip()
+    if not email: return jsonify({'ghost':None})
+    cur = get_db().cursor()
+    # fetch the battle with highest score and ghost_data present
+    cur.execute("SELECT score, ghost_data FROM battles WHERE email=%s AND ghost_data IS NOT NULL ORDER BY score DESC LIMIT 1", (email,))
+    row = cur.fetchone()
+    if row and row['ghost_data']:
+        return jsonify({'ghost': {'score': row['score'], 'timestamps': row['ghost_data']}})
+    return jsonify({'ghost': None})
 
 @app.route('/api/leaderboard')
 def leaderboard():
@@ -152,7 +171,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Clean, Advanced Gear 5 Intro) ----------
+# ---------- Frontend (Ghost Mode added) ----------
 FRONTEND_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -197,23 +216,23 @@ FRONTEND_HTML = r"""
   .fade-out{animation:fadeOutBanner 1s ease forwards}
   @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
 
-  /* ───────── ADVANCED GEAR 5 INTRO (no rings) ───────── */
+  /* Ghost indicator */
+  .ghost-overlay{position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.7);padding:8px 14px;border-radius:12px;font-size:1.2rem;z-index:8;display:none}
+  .ghost-overlay .ghost-icon{font-size:1.5rem}
+  .ghost-overlay .ghost-count{font-weight:bold;color:#aaa;margin-left:5px}
+  .ghost-beaten{color:#0f0 !important;animation:beatPulse 0.6s ease}
+
+  /* Intro (unchanged) */
   .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:radial-gradient(circle at 50% 40%, #0d071a 0%, #000 100%);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
   .intro-scene{display:flex;flex-direction:column;align-items:center;justify-content:space-between;height:100%;width:100%;padding:60px 20px 40px}
-
-  /* Title at top – clean but powerful */
   .intro-title-top{text-align:center;z-index:10}
   .intro-title-main{font-size:3.2rem;font-weight:900;color:transparent;background:linear-gradient(135deg,#ff4500,#ff00ff,#ff4500);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 25px #ff00ff);animation:titleGlow 2s ease-in-out infinite, titleEntrance 0.8s ease forwards}
-
-  /* Luffy image – premium cinematic entrance */
   .luffy-image-container{position:relative;width:220px;height:220px;display:flex;align-items:center;justify-content:center;z-index:2}
-  .luffy-image{width:190px;height:190px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.15);box-shadow:0 0 40px rgba(255,69,0,0.4), 0 0 80px rgba(255,0,255,0.3), 0 0 120px rgba(255,100,0,0.2);animation:cinematicEntrance 1.4s ease forwards, cinematicPulse 2.5s 1.4s ease-in-out infinite}
+  .luffy-image{width:190px;height:190px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.15);box-shadow:0 0 40px rgba(255,69,0,0.4),0 0 80px rgba(255,0,255,0.3),0 0 120px rgba(255,100,0,0.2);animation:cinematicEntrance 1.4s ease forwards, cinematicPulse 2.5s 1.4s ease-in-out infinite}
   @keyframes cinematicEntrance{0%{transform:scale(0.3) translateY(30px);opacity:0;filter:brightness(0.3)}60%{transform:scale(1.05) translateY(-5px);opacity:1;filter:brightness(1.2)}100%{transform:scale(1) translateY(0);opacity:1;filter:brightness(1)}}
   @keyframes cinematicPulse{0%,100%{box-shadow:0 0 40px rgba(255,69,0,0.4),0 0 80px rgba(255,0,255,0.3),0 0 120px rgba(255,100,0,0.2)}50%{box-shadow:0 0 60px rgba(255,69,0,0.7),0 0 100px rgba(255,0,255,0.5),0 0 140px rgba(255,100,0,0.4)}}
   @keyframes titleGlow{0%,100%{filter:drop-shadow(0 0 25px #ff00ff)}50%{filter:drop-shadow(0 0 45px #ff4500) drop-shadow(0 0 60px #ff00ff)}}
   @keyframes titleEntrance{0%{opacity:0;transform:translateY(-20px) scale(0.7)}100%{opacity:1;transform:translateY(0) scale(1)}}
-
-  /* Refined floating particles */
   .particle{position:absolute;width:4px;height:4px;border-radius:50%;background:#ff4500;animation:floatParticle 3s ease-in-out infinite;opacity:0;z-index:0}
   .particle:nth-child(1){top:15%;left:12%;animation-delay:0s;background:#ff00ff;width:5px;height:5px}
   .particle:nth-child(2){top:22%;right:10%;animation-delay:0.6s}
@@ -224,16 +243,12 @@ FRONTEND_HTML = r"""
   .particle:nth-child(7){top:68%;left:16%;animation-delay:0.4s;background:#0ff;width:4px;height:4px}
   .particle:nth-child(8){top:72%;right:12%;animation-delay:1.9s;background:#ff4500}
   @keyframes floatParticle{0%{opacity:0;transform:translateY(0) scale(0)}30%{opacity:0.8;transform:translateY(-25px) scale(1)}100%{opacity:0;transform:translateY(50px) scale(0.3)}}
-
-  /* Tagline at bottom */
   .intro-tagline{font-size:1rem;color:#ccc;letter-spacing:3px;animation:tagAppear 1s 0.5s ease forwards;opacity:0;text-align:center;margin-top:10px}
   @keyframes tagAppear{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
-
   .skip-btn{position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.1);color:#aaa;padding:6px 16px;border-radius:20px;font-size:0.8rem;cursor:pointer;z-index:999}
   .intro-fadeout{animation:fadeOutIntro 0.8s ease forwards}
   @keyframes fadeOutIntro{0%{opacity:1}100%{opacity:0;visibility:hidden}}
 
-  /* Other styles unchanged */
   .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
   .luffy-img{width:70px;height:70px;border-radius:50%;object-fit:cover;border:none;box-shadow:0 0 15px rgba(0,191,255,0.6),0 0 30px rgba(255,69,0,0.4)}
   .ceo-label{font-size:.7rem;color:#ddd;margin-top:6px;background:rgba(0,0,0,0.7);padding:3px 10px;border-radius:12px;text-align:center}
@@ -268,132 +283,53 @@ FRONTEND_HTML = r"""
 </head>
 <body>
 
-<!-- ADVANCED GEAR 5 INTRO -->
+<!-- INTRO -->
 <div id="introOverlay" class="intro-overlay">
   <div class="skip-btn" onclick="skipIntro()">Tap to skip →</div>
   <div class="intro-scene">
-    <!-- Title at top -->
-    <div class="intro-title-top">
-      <div class="intro-title-main">PUSHCLASH</div>
-    </div>
-
-    <!-- Luffy Gear 5 image (no rings) -->
+    <div class="intro-title-top"><div class="intro-title-main">PUSHCLASH</div></div>
     <div class="luffy-image-container">
       <img class="luffy-image" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
-      <!-- Floating particles -->
       <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
       <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
     </div>
-
-    <!-- Tagline at bottom -->
     <div class="intro-tagline">⚡ GEAR 5 — AWAKENED ⚡</div>
   </div>
 </div>
 
-<!-- ACTIVE USERS PILL -->
-<div class="active-users-pill" id="activeUsersPill">
-  <span class="user-icon">👥</span>
-  <span class="count" id="activeUserCount">0</span>
-  <span style="font-size:0.8rem;color:#aaa">online</span>
-</div>
-
-<!-- LUFFY BADGE -->
-<div class="luffy-badge" onclick="document.getElementById('ceoModal').classList.add('active')">
-  <img class="luffy-img" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
-  <span class="ceo-label">CEO of App</span>
-</div>
+<div class="active-users-pill" id="activeUsersPill"><span class="user-icon">👥</span><span class="count" id="activeUserCount">0</span><span style="font-size:0.8rem;color:#aaa">online</span></div>
+<div class="luffy-badge" onclick="document.getElementById('ceoModal').classList.add('active')"><img class="luffy-img" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg"><span class="ceo-label">CEO of App</span></div>
 <div class="ceo-arrow">👉</div>
+<div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')"><div class="ceo-modal" onclick="event.stopPropagation()"><div style="font-size:2rem;margin-bottom:8px">👑</div><h2>KAUSHTUBH</h2><div class="title">CEO OF PUSH CLASH</div><div style="color:#ccc;font-size:0.9rem;margin:6px 0">Have a query? Get in touch</div><div class="phone">📞 8950592855</div><a href="https://wa.me/918950592855?text=Hey%20Kaushtubh%2C%20I%20have%20a%20query%20about%20PushClash" target="_blank" class="wa-btn">📱 Message on WhatsApp</a><button class="close-btn" onclick="document.getElementById('ceoModal').classList.remove('active')">Close</button></div></div>
+<div class="ai-assistant" id="aiAssistant" onclick="speakAIMessage()"><button class="ai-mute" id="aiMuteBtn" onclick="event.stopPropagation(); toggleMute()">🔊</button><span class="ai-msg" id="aiMessage">💬 Loading your coach...</span></div>
 
-<!-- CEO Modal -->
-<div id="ceoModal" class="ceo-modal-overlay" onclick="this.classList.remove('active')">
-  <div class="ceo-modal" onclick="event.stopPropagation()">
-    <div style="font-size:2rem;margin-bottom:8px">👑</div>
-    <h2>KAUSHTUBH</h2>
-    <div class="title">CEO OF PUSH CLASH</div>
-    <div style="color:#ccc;font-size:0.9rem;margin:6px 0">Have a query? Get in touch</div>
-    <div class="phone">📞 8950592855</div>
-    <div style="color:#aaa;font-size:0.7rem">Tap to call / message</div>
-    <a href="https://wa.me/918950592855?text=Hey%20Kaushtubh%2C%20I%20have%20a%20query%20about%20PushClash" target="_blank" class="wa-btn">📱 Message on WhatsApp</a>
-    <button class="close-btn" onclick="document.getElementById('ceoModal').classList.remove('active')">Close</button>
-  </div>
-</div>
-
-<!-- AI Assistant -->
-<div class="ai-assistant" id="aiAssistant" onclick="speakAIMessage()">
-  <button class="ai-mute" id="aiMuteBtn" onclick="event.stopPropagation(); toggleMute()">🔊</button>
-  <span class="ai-msg" id="aiMessage">💬 Loading your coach...</span>
-</div>
-
-<!-- Main App Container -->
 <div class="app-container" id="appContainer">
   <div id="setupScreen" class="screen">
-    <h1>PUSHCLASH</h1>
-    <div class="arena-subtitle">⚔️ ENTER THE ARENA ⚔️</div>
-    <div style="font-size:3rem;text-align:center;margin-bottom:10px">🛡️🔥🛡️</div>
-    <input class="battle-input" id="nameInput" placeholder="Your Warrior Name" maxlength="30">
-    <input class="battle-input" id="nationalityInput" placeholder="Nationality" maxlength="30">
-    <input class="battle-input" id="emailInput" placeholder="Email (your battle ID)" maxlength="50">
-    <div class="error-msg" id="setupError"></div>
-    <button class="btn-primary" onclick="saveProfile()">⚡ ENTER ARENA ⚡</button>
+    <h1>PUSHCLASH</h1><div class="arena-subtitle">⚔️ ENTER THE ARENA ⚔️</div><div style="font-size:3rem;text-align:center;margin-bottom:10px">🛡️🔥🛡️</div>
+    <input class="battle-input" id="nameInput" placeholder="Your Warrior Name" maxlength="30"><input class="battle-input" id="nationalityInput" placeholder="Nationality" maxlength="30"><input class="battle-input" id="emailInput" placeholder="Email (your battle ID)" maxlength="50">
+    <div class="error-msg" id="setupError"></div><button class="btn-primary" onclick="saveProfile()">⚡ ENTER ARENA ⚡</button>
     <p class="small" style="text-align:center;margin-top:16px">Only real warriors dare to compete</p>
   </div>
   <div id="instructionScreen" class="screen">
-    <h1 style="font-size:2rem;margin-bottom:20px">🚀 WELCOME, WARRIOR!</h1>
-    <div class="instruction-box">
-      <p><span class="emoji">🤖</span> PushClash is an <strong>AI fitness battlefield</strong> where you crush push‑ups and your reps are counted live by our AI referee.</p>
-      <p><span class="emoji">⏱️</span> You get <strong>60 seconds</strong> to do as many clean push‑ups as possible. Every rep counts, every second matters.</p>
-      <p><span class="emoji">🏆</span> Your best score hits the <strong>Weekly Global Leaderboard</strong>. Rise up, own your nation, become the #1 push‑up legend.</p>
-      <p><span class="emoji">👑</span> This app was built with pure hustle by <strong>Kaushtubh (CEO)</strong>. Tap the Luffy badge anytime to see who's running the show.</p>
-      <p><span class="emoji">🔥</span> No mercy, no shortcuts. Only raw power brings glory. Ready to turn your body into a weapon?</p>
-    </div>
-    <div class="checkbox-row">
-      <input type="checkbox" id="agreeCheck">
-      <label for="agreeCheck">I have read all instructions carefully</label>
-    </div>
+    <h1 style="font-size:2rem;margin-bottom:20px">🚀 WELCOME, WARRIOR!</h1><div class="instruction-box"><p><span class="emoji">🤖</span> PushClash is an <strong>AI fitness battlefield</strong> where you crush push‑ups and your reps are counted live by our AI referee.</p><p><span class="emoji">⏱️</span> You get <strong>60 seconds</strong> to do as many clean push‑ups as possible. Every rep counts, every second matters.</p><p><span class="emoji">🏆</span> Your best score hits the <strong>Weekly Global Leaderboard</strong>. Rise up, own your nation, become the #1 push‑up legend.</p><p><span class="emoji">👑</span> This app was built with pure hustle by <strong>Kaushtubh (CEO)</strong>. Tap the Luffy badge anytime to see who's running the show.</p><p><span class="emoji">🔥</span> No mercy, no shortcuts. Only raw power brings glory. Ready to turn your body into a weapon?</p></div>
+    <div class="checkbox-row"><input type="checkbox" id="agreeCheck"><label for="agreeCheck">I have read all instructions carefully</label></div>
     <button class="btn-primary" id="enterArenaBtn" disabled onclick="showScreen('dashboardScreen'); loadStats(); speakWelcome();">⚡ I'M READY, ENTER ARENA ⚡</button>
   </div>
   <div id="dashboardScreen" class="screen">
-    <h1>PUSHCLASH</h1>
-    <p style="font-size:1.4rem">Welcome, <span id="dashName"></span>!</p>
-    <p class="small">🌍 <span id="dashNationality"></span></p>
-    <div style="display:flex;gap:12px;margin:20px 0">
-      <div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#0ff" id="personalBest">0</div><div class="small">Personal Best</div></div>
-      <div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#f0f" id="totalBattles">0</div><div class="small">Total Battles</div></div>
-    </div>
-    <div style="display:flex;gap:12px;margin:10px 0;color:#ff0">
-      <span id="streakDisplay" style="font-size:0.9rem">🔥 Streak: 0 days</span>
-      <span id="targetDisplay" style="font-size:0.9rem">🎯 Daily target: 10</span>
-    </div>
-    <button class="btn-primary" onclick="startChallenge('ai')">🤖 START AI BATTLE</button>
+    <h1>PUSHCLASH</h1><p style="font-size:1.4rem">Welcome, <span id="dashName"></span>!</p><p class="small">🌍 <span id="dashNationality"></span></p>
+    <div style="display:flex;gap:12px;margin:20px 0"><div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#0ff" id="personalBest">0</div><div class="small">Personal Best</div></div><div style="flex:1;background:#1a1a1a;border-radius:14px;padding:12px;text-align:center"><div style="font-size:2rem;font-weight:bold;color:#f0f" id="totalBattles">0</div><div class="small">Total Battles</div></div></div>
+    <div style="display:flex;gap:12px;margin:10px 0;color:#ff0"><span id="streakDisplay" style="font-size:0.9rem">🔥 Streak: 0 days</span><span id="targetDisplay" style="font-size:0.9rem">🎯 Daily target: 10</span></div>
+    <button class="btn-primary" onclick="startChallenge('normal')">🤖 START AI BATTLE</button>
+    <button class="btn-primary" onclick="startChallenge('ghost')" style="background:linear-gradient(135deg,#6a0dad,#00bfff);" id="ghostBtn">👻 RACE MY GHOST</button>
     <button class="btn-secondary" onclick="showLeaderboard()">🏆 Weekly Leaderboard</button>
     <button class="btn-secondary" onclick="showStats()">📊 MY STATS</button>
     <button class="btn-secondary" onclick="resetProfile()">🔄 Leave Arena</button>
     <div class="success-msg" id="saveConfirmation" style="display:none">✅ Score saved to global arena!</div>
   </div>
   <div id="statsScreen" class="screen">
-    <h1>📊 MY STATS & PLAN</h1>
-    <div class="stats-box">
-      <div class="stats-row">
-        <div class="stats-card"><div class="big-num" id="statTotalPushups">0</div><div class="label">Total Push‑ups</div></div>
-        <div class="stats-card"><div class="big-num" id="statBest">0</div><div class="label">Personal Best</div></div>
-      </div>
-      <div class="stats-row">
-        <div class="stats-card"><div class="big-num" id="statBattles">0</div><div class="label">Battles Fought</div></div>
-        <div class="stats-card"><div class="big-num" id="statRank">-</div><div class="label">Weekly Rank</div></div>
-      </div>
-    </div>
-    <h3>📅 Weekly Training Plan</h3>
-    <div id="weeklyPlan" class="stats-box" style="font-size:0.85rem">
-      <div class="plan-item"><span>Mon</span><span>30 push‑ups</span></div>
-      <div class="plan-item"><span>Tue</span><span>35 push‑ups</span></div>
-      <div class="plan-item"><span>Wed</span><span>REST</span></div>
-      <div class="plan-item"><span>Thu</span><span>40 push‑ups</span></div>
-      <div class="plan-item"><span>Fri</span><span>35 push‑ups</span></div>
-      <div class="plan-item"><span>Sat</span><span>50 push‑ups (challenge)</span></div>
-      <div class="plan-item"><span>Sun</span><span>Active recovery</span></div>
-    </div>
-    <h3>📜 Recent Battles</h3>
-    <div id="recentBattlesList" style="max-height:200px;overflow-y:auto"></div>
+    <h1>📊 MY STATS & PLAN</h1><div class="stats-box"><div class="stats-row"><div class="stats-card"><div class="big-num" id="statTotalPushups">0</div><div class="label">Total Push‑ups</div></div><div class="stats-card"><div class="big-num" id="statBest">0</div><div class="label">Personal Best</div></div></div><div class="stats-row"><div class="stats-card"><div class="big-num" id="statBattles">0</div><div class="label">Battles Fought</div></div><div class="stats-card"><div class="big-num" id="statRank">-</div><div class="label">Weekly Rank</div></div></div></div>
+    <h3>📅 Weekly Training Plan</h3><div id="weeklyPlan" class="stats-box" style="font-size:0.85rem"><div class="plan-item"><span>Mon</span><span>30 push‑ups</span></div><div class="plan-item"><span>Tue</span><span>35 push‑ups</span></div><div class="plan-item"><span>Wed</span><span>REST</span></div><div class="plan-item"><span>Thu</span><span>40 push‑ups</span></div><div class="plan-item"><span>Fri</span><span>35 push‑ups</span></div><div class="plan-item"><span>Sat</span><span>50 push‑ups (challenge)</span></div><div class="plan-item"><span>Sun</span><span>Active recovery</span></div></div>
+    <h3>📜 Recent Battles</h3><div id="recentBattlesList" style="max-height:200px;overflow-y:auto"></div>
     <button class="btn-secondary" onclick="showScreen('dashboardScreen')">← Back to Arena</button>
   </div>
   <div id="challengeScreen" class="screen">
@@ -407,10 +343,9 @@ FRONTEND_HTML = r"""
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
         <div class="debug-msg" id="debugMsg"></div>
-        <div class="motivation-banner" id="motivationBanner">
-          <strong>👁️ THE AI IS WATCHING EVERY REP 👁️</strong><br>
-          Start your push‑ups NOW! No distractions, no excuses — pure power only. The AI referee sees every move and counts every clean rep. Show the world what you're made of! 💪🚀
-        </div>
+        <div class="motivation-banner" id="motivationBanner"><strong>👁️ THE AI IS WATCHING EVERY REP 👁️</strong><br>Start your push‑ups NOW! No distractions, no excuses — pure power only. The AI referee sees every move and counts every clean rep. Show the world what you're made of! 💪🚀</div>
+        <!-- GHOST OVERLAY -->
+        <div class="ghost-overlay" id="ghostOverlay"><span class="ghost-icon">👻</span><span class="ghost-count" id="ghostCount">0</span></div>
       </div>
     </div>
     <div id="battleResultUI" style="display:none;text-align:center">
@@ -423,51 +358,30 @@ FRONTEND_HTML = r"""
     </div>
   </div>
   <div id="leaderboardScreen" class="screen">
-    <h1>WEEKLY RANKINGS</h1>
-    <p class="small" style="text-align:center">Top 10 of the last 7 days</p>
-    <div id="leaderboardList"></div>
-    <button class="btn-secondary" onclick="showScreen('dashboardScreen')" style="margin-top:16px">← Back to Arena</button>
+    <h1>WEEKLY RANKINGS</h1><p class="small" style="text-align:center">Top 10 of the last 7 days</p><div id="leaderboardList"></div><button class="btn-secondary" onclick="showScreen('dashboardScreen')" style="margin-top:16px">← Back to Arena</button>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
 <script>
-  let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval, countdownInterval, challengeMode = 'ai', aiDetector = null, aiStream = null;
+  let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval, countdownInterval, challengeMode = 'normal', aiDetector = null, aiStream = null;
   let muteAI = false;
   let idleTimer = null;
   let bannerTimer = null;
+  let ghostTimestamps = [];  // stores rep times during battle
+  let battleStartTime = 0;
+  let ghostData = null;   // {score, timestamps} loaded from API
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
   // ---------- Intro ----------
-  function skipIntro() {
-    clearTimeout(window._introTimer);
-    const overlay = document.getElementById('introOverlay');
-    overlay.classList.add('intro-fadeout');
-    setTimeout(() => { overlay.style.display = 'none'; proceedToApp(); }, 800);
-  }
-
-  function proceedToApp() {
-    document.getElementById('appContainer').classList.add('visible');
-    currentUser = JSON.parse(localStorage.getItem('pushclash_user'));
-    if (currentUser) { showScreen('dashboardScreen'); loadStats(); }
-    else { showScreen('setupScreen'); }
-  }
-
-  window.addEventListener('load', () => {
-    const overlay = document.getElementById('introOverlay');
-    overlay.style.display = 'flex';
-    window._introTimer = setTimeout(() => {
-      overlay.classList.add('intro-fadeout');
-      setTimeout(() => { overlay.style.display = 'none'; proceedToApp(); }, 800);
-    }, 5000);
-  });
+  function skipIntro() { clearTimeout(window._introTimer); const overlay = document.getElementById('introOverlay'); overlay.classList.add('intro-fadeout'); setTimeout(() => { overlay.style.display = 'none'; proceedToApp(); }, 800); }
+  function proceedToApp() { document.getElementById('appContainer').classList.add('visible'); currentUser = JSON.parse(localStorage.getItem('pushclash_user')); if (currentUser) { showScreen('dashboardScreen'); loadStats(); } else { showScreen('setupScreen'); } }
+  window.addEventListener('load', () => { const overlay = document.getElementById('introOverlay'); overlay.style.display = 'flex'; window._introTimer = setTimeout(() => { overlay.classList.add('intro-fadeout'); setTimeout(() => { overlay.style.display = 'none'; proceedToApp(); }, 800); }, 5000); });
 
   // ---------- Active user count ----------
-  async function refreshActiveCount() {
-    try { const res = await fetch('/api/active_users'); const data = await res.json(); document.getElementById('activeUserCount').textContent = data.count; } catch(e) {}
-  }
+  async function refreshActiveCount() { try { const res = await fetch('/api/active_users'); const data = await res.json(); document.getElementById('activeUserCount').textContent = data.count; } catch(e) {} }
   setInterval(refreshActiveCount, 10000);
 
   function speak(msg) { if (muteAI) return; const utter = new SpeechSynthesisUtterance(msg); utter.lang='en-US'; utter.rate=0.95; speechSynthesis.speak(utter); }
@@ -475,98 +389,75 @@ FRONTEND_HTML = r"""
   function setAIMessage(msg) { document.getElementById('aiMessage').textContent = msg; }
   function speakAIMessage() { speak(document.getElementById('aiMessage').textContent); }
 
-  function resetIdleTimer() {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      if (document.getElementById('dashboardScreen').classList.contains('active') && currentUser) {
-        speak("Hey " + currentUser.name + ", you haven't started a battle yet! Let's crush those push‑ups!");
-        setAIMessage("💤 Still resting, " + currentUser.name + "? Your push‑up target is waiting!");
-      }
-    }, 120000);
-  }
+  function resetIdleTimer() { if (idleTimer) clearTimeout(idleTimer); idleTimer = setTimeout(() => { if (document.getElementById('dashboardScreen').classList.contains('active') && currentUser) { speak("Hey " + currentUser.name + ", you haven't started a battle yet! Let's crush those push‑ups!"); setAIMessage("💤 Still resting, " + currentUser.name + "? Your push‑up target is waiting!"); } }, 120000); }
 
-  async function updateDashboardInfo() {
-    if (!currentUser) return;
-    try {
-      const [streakRes, targetRes] = await Promise.all([fetch('/api/streak?email='+encodeURIComponent(currentUser.email)),fetch('/api/target?email='+encodeURIComponent(currentUser.email))]);
-      const streakData = await streakRes.json(), targetData = await targetRes.json();
-      document.getElementById('streakDisplay').textContent = '🔥 Streak: ' + streakData.streak + ' days';
-      document.getElementById('targetDisplay').textContent = '🎯 Target: ' + targetData.todayDone + '/' + targetData.target;
-      return { streak: streakData.streak, target: targetData.target, done: targetData.todayDone };
-    } catch(e) { return { streak: 0, target: 10, done: 0 }; }
-  }
+  async function updateDashboardInfo() { if (!currentUser) return; try { const [streakRes, targetRes] = await Promise.all([fetch('/api/streak?email='+encodeURIComponent(currentUser.email)),fetch('/api/target?email='+encodeURIComponent(currentUser.email))]); const streakData = await streakRes.json(), targetData = await targetRes.json(); document.getElementById('streakDisplay').textContent = '🔥 Streak: ' + streakData.streak + ' days'; document.getElementById('targetDisplay').textContent = '🎯 Target: ' + targetData.todayDone + '/' + targetData.target; return { streak: streakData.streak, target: targetData.target, done: targetData.todayDone }; } catch(e) { return { streak: 0, target: 10, done: 0 }; } }
 
-  async function speakDashboardWelcome() {
-    if (!currentUser) return;
-    const { streak, target, done } = await updateDashboardInfo();
-    const remaining = Math.max(0, target - done);
-    const msg = `Welcome back, ${currentUser.name}! Your streak is ${streak} days. Today's push‑up target is ${target}. You've done ${done}, ${remaining} to go!`;
-    speak(msg); setAIMessage("💬 " + msg); resetIdleTimer();
-  }
+  async function speakDashboardWelcome() { if (!currentUser) return; const { streak, target, done } = await updateDashboardInfo(); const remaining = Math.max(0, target - done); const msg = `Welcome back, ${currentUser.name}! Your streak is ${streak} days. Today's push‑up target is ${target}. You've done ${done}, ${remaining} to go!`; speak(msg); setAIMessage("💬 " + msg); resetIdleTimer(); }
 
-  function speakWelcome() {
-    const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness.");
-    msg.lang='en-US'; msg.rate=0.9; msg.pitch=1.1;
-    const voices = speechSynthesis.getVoices();
-    const femaleVoice = voices.find(v => v.name.toLowerCase().includes('female')||v.name.toLowerCase().includes('samantha')||v.name.toLowerCase().includes('google uk female')||v.name.toLowerCase().includes('microsoft zira'));
-    if (femaleVoice) msg.voice = femaleVoice;
-    speechSynthesis.speak(msg); speakDashboardWelcome();
-  }
-  function speakChampion() {
-    const msg = new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger.");
-    msg.lang='en-US'; msg.rate=0.85; msg.pitch=0.8;
-    const voices = speechSynthesis.getVoices();
-    const maleVoice = voices.find(v => v.name.toLowerCase().includes('male')||v.name.toLowerCase().includes('google uk male')||v.name.toLowerCase().includes('microsoft david')||v.name.toLowerCase().includes('daniel'));
-    if (maleVoice) msg.voice = maleVoice;
-    speechSynthesis.speak(msg);
-  }
+  function speakWelcome() { const msg = new SpeechSynthesisUtterance("Welcome to PushClash. This is the world where people battle for fitness."); msg.lang='en-US'; msg.rate=0.9; msg.pitch=1.1; const voices = speechSynthesis.getVoices(); const femaleVoice = voices.find(v => v.name.toLowerCase().includes('female')||v.name.toLowerCase().includes('samantha')||v.name.toLowerCase().includes('google uk female')||v.name.toLowerCase().includes('microsoft zira')); if (femaleVoice) msg.voice = femaleVoice; speechSynthesis.speak(msg); speakDashboardWelcome(); }
+  function speakChampion() { const msg = new SpeechSynthesisUtterance("Champions are built in losses, my friend. Come back stronger."); msg.lang='en-US'; msg.rate=0.85; msg.pitch=0.8; const voices = speechSynthesis.getVoices(); const maleVoice = voices.find(v => v.name.toLowerCase().includes('male')||v.name.toLowerCase().includes('google uk male')||v.name.toLowerCase().includes('microsoft david')||v.name.toLowerCase().includes('daniel')); if (maleVoice) msg.voice = maleVoice; speechSynthesis.speak(msg); }
 
-  async function saveProfile(){
-    const n=document.getElementById('nameInput').value.trim(),nat=document.getElementById('nationalityInput').value.trim(),em=document.getElementById('emailInput').value.trim(),err=document.getElementById('setupError');
-    if(!n||!nat||!em){err.textContent='All fields are required!';return}
-    if(!em.includes('@')||!em.includes('.')){err.textContent='Please enter a valid email';return}
-    const checkRes=await fetch('/api/check-email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:em})});
-    if((await checkRes.json()).exists){err.textContent='This email is already registered.';return}
-    err.textContent='';currentUser={name:n,nationality:nat,email:em};localStorage.setItem('pushclash_user',JSON.stringify(currentUser));
-    showScreen('instructionScreen');
-  }
+  async function saveProfile(){ const n=document.getElementById('nameInput').value.trim(),nat=document.getElementById('nationalityInput').value.trim(),em=document.getElementById('emailInput').value.trim(),err=document.getElementById('setupError'); if(!n||!nat||!em){err.textContent='All fields are required!';return} if(!em.includes('@')||!em.includes('.')){err.textContent='Please enter a valid email';return} const checkRes=await fetch('/api/check-email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:em})}); if((await checkRes.json()).exists){err.textContent='This email is already registered.';return} err.textContent='';currentUser={name:n,nationality:nat,email:em};localStorage.setItem('pushclash_user',JSON.stringify(currentUser)); showScreen('instructionScreen'); }
 
   document.getElementById('agreeCheck').addEventListener('change',function(){document.getElementById('enterArenaBtn').disabled=!this.checked;});
   function resetProfile(){localStorage.removeItem('pushclash_user');currentUser=null;showScreen('setupScreen');}
-  function showScreen(id){document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active'));document.getElementById(id).classList.add('active');if(id!=='dashboardScreen')document.getElementById('saveConfirmation').style.display='none';if(id==='dashboardScreen'){resetIdleTimer();updateDashboardInfo();}}
+  function showScreen(id){document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active'));document.getElementById(id).classList.add('active');if(id!=='dashboardScreen')document.getElementById('saveConfirmation').style.display='none';if(id==='dashboardScreen'){resetIdleTimer();updateDashboardInfo(); loadGhostButton();}}
   function goToDashboard(){if(aiStream){aiStream.getTracks().forEach(t=>t.stop());aiStream=null}loadStats();showScreen('dashboardScreen');resetIdleTimer();}
 
-  async function loadStats(){
-    if(!currentUser)return;
-    document.getElementById('dashName').textContent=currentUser.name;document.getElementById('dashNationality').textContent=currentUser.nationality;
-    const res=await fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})});
-    const data=await res.json();document.getElementById('personalBest').textContent=data.personalBest;document.getElementById('totalBattles').textContent=data.totalBattles;
-    localStorage.setItem('pushclash_stats',JSON.stringify(data));refreshActiveCount();
+  async function loadStats(){ if(!currentUser)return; document.getElementById('dashName').textContent=currentUser.name;document.getElementById('dashNationality').textContent=currentUser.nationality; const res=await fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})}); const data=await res.json();document.getElementById('personalBest').textContent=data.personalBest;document.getElementById('totalBattles').textContent=data.totalBattles; localStorage.setItem('pushclash_stats',JSON.stringify(data));refreshActiveCount(); }
+
+  // ---------- Ghost Button Loader ----------
+  async function loadGhostButton() {
+    if (!currentUser) return;
+    try {
+      const res = await fetch('/api/ghost?email=' + encodeURIComponent(currentUser.email));
+      const data = await res.json();
+      const btn = document.getElementById('ghostBtn');
+      if (data.ghost && data.ghost.score > 0) {
+        btn.style.display = 'block';
+        btn.textContent = `👻 RACE MY GHOST (PB: ${data.ghost.score})`;
+      } else {
+        btn.style.display = 'none';
+      }
+    } catch(e) { document.getElementById('ghostBtn').style.display = 'none'; }
   }
 
-  async function showStats(){
-    if(!currentUser)return;
-    const res=await fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})});
-    const data=await res.json();
-    document.getElementById('statTotalPushups').textContent=data.totalPushups;document.getElementById('statBest').textContent=data.personalBest;
-    document.getElementById('statBattles').textContent=data.totalBattles;document.getElementById('statRank').textContent=data.rank;
-    const container=document.getElementById('recentBattlesList');
-    if(!data.recentBattles.length){container.innerHTML='<p style="color:#aaa">No battles yet.</p>';}
-    else{container.innerHTML=data.recentBattles.map(b=>`<div class="recent-item"><span>🔥 ${b.score}</span><span class="small">${b.date}</span></div>`).join('');}
-    showScreen('statsScreen');
-  }
+  async function showStats(){ if(!currentUser)return; const res=await fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})}); const data=await res.json(); document.getElementById('statTotalPushups').textContent=data.totalPushups;document.getElementById('statBest').textContent=data.personalBest;document.getElementById('statBattles').textContent=data.totalBattles;document.getElementById('statRank').textContent=data.rank; const container=document.getElementById('recentBattlesList'); if(!data.recentBattles.length){container.innerHTML='<p style="color:#aaa">No battles yet.</p>';} else{container.innerHTML=data.recentBattles.map(b=>`<div class="recent-item"><span>🔥 ${b.score}</span><span class="small">${b.date}</span></div>`).join('');} showScreen('statsScreen'); }
 
-  async function startChallenge(mode){
-    challengeMode=mode;showScreen('challengeScreen');
-    document.getElementById('countdownDisplay').style.display='block';document.getElementById('challengeActiveUI').style.display='none';
-    document.getElementById('motivationBanner').style.display='none';document.getElementById('motivationBanner').classList.remove('fade-out');
-    document.getElementById('battleResultUI').style.display='none';if(bannerTimer)clearTimeout(bannerTimer);
-    repCount=0;let count=3;document.getElementById('countdownDisplay').textContent=count;
+  // ---------- CHALLENGE START ----------
+  async function startChallenge(mode) {
+    challengeMode = mode || 'normal';
+    ghostTimestamps = [];
+    battleStartTime = 0;
+    showScreen('challengeScreen');
+    document.getElementById('countdownDisplay').style.display='block';
+    document.getElementById('challengeActiveUI').style.display='none';
+    document.getElementById('motivationBanner').style.display='none';
+    document.getElementById('motivationBanner').classList.remove('fade-out');
+    document.getElementById('battleResultUI').style.display='none';
+    if (bannerTimer) clearTimeout(bannerTimer);
+    repCount = 0;
+    // Load ghost data if racing
+    if (challengeMode === 'ghost' && currentUser) {
+      try {
+        const res = await fetch('/api/ghost?email=' + encodeURIComponent(currentUser.email));
+        const data = await res.json();
+        ghostData = data.ghost;
+        document.getElementById('ghostOverlay').style.display = 'block';
+        document.getElementById('ghostCount').textContent = '0';
+      } catch(e) { ghostData = null; }
+    } else {
+      ghostData = null;
+      document.getElementById('ghostOverlay').style.display = 'none';
+    }
+    let count=3; document.getElementById('countdownDisplay').textContent=count;
     countdownInterval=setInterval(()=>{count--;if(count===0){document.getElementById('countdownDisplay').textContent='GO!';speak("Go!");setTimeout(()=>{clearInterval(countdownInterval);document.getElementById('countdownDisplay').style.display='none';startActiveChallenge();},400)}else{document.getElementById('countdownDisplay').textContent=count;speak(count.toString())}},800);
   }
 
   async function startActiveChallenge(){
-    timeLeft=60;document.getElementById('challengeActiveUI').style.display='block';document.getElementById('timerDisplay').textContent=timeLeft;
+    timeLeft=60; battleStartTime = Date.now();
+    document.getElementById('challengeActiveUI').style.display='block';document.getElementById('timerDisplay').textContent=timeLeft;
     document.getElementById('repCounter').textContent='0';document.getElementById('aiCameraUI').style.display='block';
     document.getElementById('debugMsg').textContent='📷 Camera starting...';startAIModel();
     const banner=document.getElementById('motivationBanner');banner.style.display='block';banner.classList.remove('fade-out');
@@ -578,9 +469,7 @@ FRONTEND_HTML = r"""
     if(currentUser)fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})});
   }
 
-  async function startAIModel(){
-    try{const cfg={modelType:'SinglePose.Lightning'};aiDetector=await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,cfg);document.getElementById('debugMsg').textContent='✅ AI ready – show yourself!';}catch(e){document.getElementById('debugMsg').textContent='❌ AI model failed. Check internet.';}
-  }
+  async function startAIModel(){ try{const cfg={modelType:'SinglePose.Lightning'};aiDetector=await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,cfg);document.getElementById('debugMsg').textContent='✅ AI ready – show yourself!';}catch(e){document.getElementById('debugMsg').textContent='❌ AI model failed. Check internet.';} }
 
   let angleBuffer=[],lastRepTime=0,aiState='up';
   async function startAICamera(){
@@ -602,7 +491,20 @@ FRONTEND_HTML = r"""
         const la=calculateAngle(ls,le,lw),ra=calculateAngle(rs,re,rw),raw=(la+ra)/2;angleBuffer.push(raw);if(angleBuffer.length>5)angleBuffer.shift();
         const sa=movingAverage(angleBuffer,5);if(sa===null){requestAnimationFrame(detectPose);return}
         overlay.textContent=Math.round(sa)+'°';overlay.style.display='block';debugMsg.textContent='🟢 Active – '+Math.round(sa)+'°';
-        const now=Date.now();if(aiState==='up'&&sa<90){aiState='down'}else if(aiState==='down'&&sa>150){if(now-lastRepTime>500){repCount++;document.getElementById('repCounter').textContent=repCount;lastRepTime=now;const flash=document.getElementById('repFlash');flash.style.display='block';setTimeout(()=>{flash.style.display='none'},800)}aiState='up'}
+        const now=Date.now();if(aiState==='up'&&sa<90){aiState='down'}else if(aiState==='down'&&sa>150){if(now-lastRepTime>500){repCount++;document.getElementById('repCounter').textContent=repCount;lastRepTime=now;
+          // Record ghost timestamp
+          if (battleStartTime > 0) { ghostTimestamps.push((now - battleStartTime) / 1000); }
+          // Update ghost overlay if racing
+          if (ghostData && ghostData.timestamps) {
+            const elapsed = (now - battleStartTime) / 1000;
+            let ghostReps = 0;
+            for (let t of ghostData.timestamps) { if (t <= elapsed) ghostReps++; }
+            document.getElementById('ghostCount').textContent = ghostReps;
+            if (repCount > ghostReps) document.getElementById('ghostCount').classList.add('ghost-beaten');
+            else document.getElementById('ghostCount').classList.remove('ghost-beaten');
+          }
+          const flash=document.getElementById('repFlash');flash.style.display='block';setTimeout(()=>{flash.style.display='none'},800);
+        }aiState='up'}
       }else{overlay.textContent='?';overlay.style.display='block';debugMsg.textContent='⚠️ Not all keypoints visible'}
     }else{overlay.textContent='?';overlay.style.display='block';debugMsg.textContent='🔍 Searching for pose...'}
     requestAnimationFrame(detectPose);
@@ -614,10 +516,21 @@ FRONTEND_HTML = r"""
   async function endBattle(){
     if(aiStream){aiStream.getTracks().forEach(t=>t.stop());aiStream=null}if(bannerTimer)clearTimeout(bannerTimer);
     document.getElementById('challengeActiveUI').style.display='none';document.getElementById('motivationBanner').style.display='none';
+    document.getElementById('ghostOverlay').style.display='none';
     document.getElementById('battleResultUI').style.display='block';document.getElementById('finalScore').textContent=repCount;
     document.getElementById('trashTalk').textContent=trashTalks[Math.floor(Math.random()*trashTalks.length)];
     const champ=document.getElementById('championText');champ.style.display='block';speakChampion();
-    await fetch('/api/battle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:currentUser.name,nationality:currentUser.nationality,email:currentUser.email,score:repCount})});
+
+    // Send battle data, include ghost timestamps if this was a normal battle or a new best
+    const payload = {name:currentUser.name, nationality:currentUser.nationality, email:currentUser.email, score:repCount, ghost_timestamps: ghostTimestamps.length > 0 ? ghostTimestamps : null};
+    await fetch('/api/battle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+
+    // Ghost victory message
+    if (ghostData && repCount > ghostData.score) {
+      document.getElementById('trashTalk').textContent = "👻 GHOST DEFEATED! You're stronger than your past self!";
+      speak("You defeated your ghost! New personal best recorded.");
+    }
+
     setTimeout(()=>{champ.style.display='none'},5000);
     const stats=JSON.parse(localStorage.getItem('pushclash_stats')||'{}');const pb=stats.personalBest||0;
     let analysis=`You scored ${repCount}. `;if(repCount>=pb)analysis+="That's a new personal best! You're on fire!";else analysis+=`Your PB is ${pb}. You're getting closer!`;
