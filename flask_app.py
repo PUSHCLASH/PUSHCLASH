@@ -65,7 +65,7 @@ def check_email():
 def record_battle():
     d = request.get_json()
     n, nat, em, sc = d.get('name','').strip(), d.get('nationality','').strip(), d.get('email','').strip(), int(d.get('score',0))
-    ghost = d.get('ghost_timestamps', None)  # array of rep timestamps in seconds
+    ghost = d.get('ghost_timestamps', None)
     if not n or not nat or not em or sc<=0: return jsonify({'error':'Invalid data'}),400
     cur = get_db().cursor()
     cur.execute(
@@ -80,7 +80,6 @@ def ghost():
     email = request.args.get('email','').strip()
     if not email: return jsonify({'ghost':None})
     cur = get_db().cursor()
-    # fetch the battle with highest score and ghost_data present
     cur.execute("SELECT score, ghost_data FROM battles WHERE email=%s AND ghost_data IS NOT NULL ORDER BY score DESC LIMIT 1", (email,))
     row = cur.fetchone()
     if row and row['ghost_data']:
@@ -147,6 +146,64 @@ def target():
     avg = cur.fetchone()[0]
     return jsonify({'target':max(10,int(avg*1.2)+5),'todayDone':today_done})
 
+# ---------- ADVANCED WEEKLY PLAN ENDPOINT ----------
+@app.route('/api/weekly-plan')
+def weekly_plan():
+    email = request.args.get('email','').strip()
+    if not email: return jsonify({'days':[], 'weekStart':'', 'weekEnd':''})
+    cur = get_db().cursor()
+    # Determine current week (Monday to Sunday)
+    today = datetime.now(timezone.utc).date()
+    monday = today - timedelta(days=today.weekday())  # Monday
+    sunday = monday + timedelta(days=6)
+
+    # Get daily totals for each day of the week
+    cur.execute("""
+        SELECT DATE(timestamp) as day, SUM(score) as total
+        FROM battles
+        WHERE email=%s AND timestamp >= %s AND timestamp < %s
+        GROUP BY day
+    """, (email, monday.isoformat(), (sunday+timedelta(days=1)).isoformat()))
+    daily_data = {row['day']: row['total'] for row in cur.fetchall()}
+
+    # Calculate average daily push-ups from last 7 days for target
+    seven_days_ago = today - timedelta(days=7)
+    cur.execute("""
+        SELECT COALESCE(AVG(daily_total),0)
+        FROM (
+            SELECT SUM(score) as daily_total
+            FROM battles
+            WHERE email=%s AND timestamp >= %s
+            GROUP BY DATE(timestamp)
+        ) sub
+    """, (email, seven_days_ago))
+    avg = cur.fetchone()[0]
+    base_target = max(10, int(avg * 1.2) + 5)
+
+    days_names = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+    days = []
+    for i in range(7):
+        day_date = monday + timedelta(days=i)
+        day_name = days_names[i]
+        # Wednesday and Sunday are rest days
+        is_rest = (day_name == 'Wed' or day_name == 'Sun')
+        target = 0 if is_rest else base_target
+        done = int(daily_data.get(day_date, 0))
+        days.append({
+            'day': day_name,
+            'date': day_date.isoformat(),
+            'target': target,
+            'done': done,
+            'is_rest': is_rest,
+            'is_today': day_date == today
+        })
+
+    return jsonify({
+        'days': days,
+        'weekStart': monday.isoformat(),
+        'weekEnd': sunday.isoformat()
+    })
+
 @app.route('/api/active_users')
 def active_users_endpoint():
     return jsonify({'count':get_active_count()})
@@ -171,7 +228,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (Ghost Mode added) ----------
+# ---------- Frontend (Advanced Weekly Plan + Ghost + All) ----------
 FRONTEND_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -216,7 +273,7 @@ FRONTEND_HTML = r"""
   .fade-out{animation:fadeOutBanner 1s ease forwards}
   @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
 
-  /* Ghost indicator */
+  /* Ghost overlay */
   .ghost-overlay{position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.7);padding:8px 14px;border-radius:12px;font-size:1.2rem;z-index:8;display:none}
   .ghost-overlay .ghost-icon{font-size:1.5rem}
   .ghost-overlay .ghost-count{font-weight:bold;color:#aaa;margin-left:5px}
@@ -275,7 +332,22 @@ FRONTEND_HTML = r"""
   .stats-card{flex:1;background:#1a1a1a;border-radius:12px;padding:12px;text-align:center}
   .stats-card .big-num{font-size:2rem;font-weight:bold;color:#0ff}
   .recent-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #333}
-  .plan-item{display:flex;justify-content:space-between;padding:6px 0;color:#ccc}
+
+  /* Advanced weekly plan styles */
+  .weekly-plan-container{background:rgba(0,0,0,0.7);border-radius:16px;padding:16px;margin:15px 0}
+  .day-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;position:relative}
+  .day-row:last-child{border-bottom:none}
+  .day-label{width:35px;font-weight:bold;color:#ccc}
+  .day-date{font-size:0.7rem;color:#888;width:45px}
+  .progress-container{flex:1;height:8px;background:#333;border-radius:4px;overflow:hidden}
+  .progress-bar{height:100%;background:linear-gradient(90deg,#00bfff,#00ff88);width:0%;transition:width 0.5s ease;border-radius:4px}
+  .progress-bar.rest{background:#444}
+  .progress-bar.over{background:linear-gradient(90deg,#ff4500,#ff00ff)}
+  .day-status{font-size:0.7rem;width:60px;text-align:right;color:#aaa}
+  .day-row.rest-day .day-label{color:#ff4500}
+  .day-row.rest-day .day-status{color:#ff4500}
+  .day-row.today{background:rgba(0,255,255,0.05);border-radius:8px;padding:8px;animation:pulseToday 2s infinite}
+  @keyframes pulseToday{0%,100%{box-shadow:0 0 0 rgba(0,255,255,0)}50%{box-shadow:0 0 12px rgba(0,255,255,0.3)}}
   .ai-assistant{position:fixed;bottom:20px;right:20px;z-index:15000;background:linear-gradient(135deg,#ff4500,#ff00ff);color:#fff;padding:10px 16px;border-radius:20px;font-size:0.85rem;max-width:250px;box-shadow:0 0 20px rgba(255,0,255,0.4);cursor:pointer}
   .ai-msg{display:block;line-height:1.4}
   .ai-mute{position:absolute;top:-8px;right:-8px;background:#fff;color:#000;width:24px;height:24px;border-radius:50%;font-size:0.8rem;border:none;cursor:pointer}
@@ -328,7 +400,8 @@ FRONTEND_HTML = r"""
   </div>
   <div id="statsScreen" class="screen">
     <h1>📊 MY STATS & PLAN</h1><div class="stats-box"><div class="stats-row"><div class="stats-card"><div class="big-num" id="statTotalPushups">0</div><div class="label">Total Push‑ups</div></div><div class="stats-card"><div class="big-num" id="statBest">0</div><div class="label">Personal Best</div></div></div><div class="stats-row"><div class="stats-card"><div class="big-num" id="statBattles">0</div><div class="label">Battles Fought</div></div><div class="stats-card"><div class="big-num" id="statRank">-</div><div class="label">Weekly Rank</div></div></div></div>
-    <h3>📅 Weekly Training Plan</h3><div id="weeklyPlan" class="stats-box" style="font-size:0.85rem"><div class="plan-item"><span>Mon</span><span>30 push‑ups</span></div><div class="plan-item"><span>Tue</span><span>35 push‑ups</span></div><div class="plan-item"><span>Wed</span><span>REST</span></div><div class="plan-item"><span>Thu</span><span>40 push‑ups</span></div><div class="plan-item"><span>Fri</span><span>35 push‑ups</span></div><div class="plan-item"><span>Sat</span><span>50 push‑ups (challenge)</span></div><div class="plan-item"><span>Sun</span><span>Active recovery</span></div></div>
+    <h3>📅 SMART WEEKLY PLAN</h3>
+    <div id="weeklyPlanContainer" class="weekly-plan-container">Loading your personalized plan...</div>
     <h3>📜 Recent Battles</h3><div id="recentBattlesList" style="max-height:200px;overflow-y:auto"></div>
     <button class="btn-secondary" onclick="showScreen('dashboardScreen')">← Back to Arena</button>
   </div>
@@ -344,7 +417,6 @@ FRONTEND_HTML = r"""
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
         <div class="debug-msg" id="debugMsg"></div>
         <div class="motivation-banner" id="motivationBanner"><strong>👁️ THE AI IS WATCHING EVERY REP 👁️</strong><br>Start your push‑ups NOW! No distractions, no excuses — pure power only. The AI referee sees every move and counts every clean rep. Show the world what you're made of! 💪🚀</div>
-        <!-- GHOST OVERLAY -->
         <div class="ghost-overlay" id="ghostOverlay"><span class="ghost-icon">👻</span><span class="ghost-count" id="ghostCount">0</span></div>
       </div>
     </div>
@@ -369,9 +441,9 @@ FRONTEND_HTML = r"""
   let muteAI = false;
   let idleTimer = null;
   let bannerTimer = null;
-  let ghostTimestamps = [];  // stores rep times during battle
+  let ghostTimestamps = [];
   let battleStartTime = 0;
-  let ghostData = null;   // {score, timestamps} loaded from API
+  let ghostData = null;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
@@ -407,23 +479,52 @@ FRONTEND_HTML = r"""
 
   async function loadStats(){ if(!currentUser)return; document.getElementById('dashName').textContent=currentUser.name;document.getElementById('dashNationality').textContent=currentUser.nationality; const res=await fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})}); const data=await res.json();document.getElementById('personalBest').textContent=data.personalBest;document.getElementById('totalBattles').textContent=data.totalBattles; localStorage.setItem('pushclash_stats',JSON.stringify(data));refreshActiveCount(); }
 
-  // ---------- Ghost Button Loader ----------
-  async function loadGhostButton() {
-    if (!currentUser) return;
-    try {
-      const res = await fetch('/api/ghost?email=' + encodeURIComponent(currentUser.email));
-      const data = await res.json();
-      const btn = document.getElementById('ghostBtn');
-      if (data.ghost && data.ghost.score > 0) {
-        btn.style.display = 'block';
-        btn.textContent = `👻 RACE MY GHOST (PB: ${data.ghost.score})`;
-      } else {
-        btn.style.display = 'none';
-      }
-    } catch(e) { document.getElementById('ghostBtn').style.display = 'none'; }
+  async function loadGhostButton() { if (!currentUser) return; try { const res = await fetch('/api/ghost?email=' + encodeURIComponent(currentUser.email)); const data = await res.json(); const btn = document.getElementById('ghostBtn'); if (data.ghost && data.ghost.score > 0) { btn.style.display = 'block'; btn.textContent = `👻 RACE MY GHOST (PB: ${data.ghost.score})`; } else { btn.style.display = 'none'; } } catch(e) { document.getElementById('ghostBtn').style.display = 'none'; } }
+
+  async function showStats(){
+    if(!currentUser)return;
+    const res=await fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})});
+    const data=await res.json();
+    document.getElementById('statTotalPushups').textContent=data.totalPushups;document.getElementById('statBest').textContent=data.personalBest;
+    document.getElementById('statBattles').textContent=data.totalBattles;document.getElementById('statRank').textContent=data.rank;
+    const container=document.getElementById('recentBattlesList');
+    if(!data.recentBattles.length){container.innerHTML='<p style="color:#aaa">No battles yet.</p>';}
+    else{container.innerHTML=data.recentBattles.map(b=>`<div class="recent-item"><span>🔥 ${b.score}</span><span class="small">${b.date}</span></div>`).join('');}
+    // Load advanced weekly plan
+    loadWeeklyPlan();
+    showScreen('statsScreen');
   }
 
-  async function showStats(){ if(!currentUser)return; const res=await fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})}); const data=await res.json(); document.getElementById('statTotalPushups').textContent=data.totalPushups;document.getElementById('statBest').textContent=data.personalBest;document.getElementById('statBattles').textContent=data.totalBattles;document.getElementById('statRank').textContent=data.rank; const container=document.getElementById('recentBattlesList'); if(!data.recentBattles.length){container.innerHTML='<p style="color:#aaa">No battles yet.</p>';} else{container.innerHTML=data.recentBattles.map(b=>`<div class="recent-item"><span>🔥 ${b.score}</span><span class="small">${b.date}</span></div>`).join('');} showScreen('statsScreen'); }
+  async function loadWeeklyPlan() {
+    if (!currentUser) return;
+    try {
+      const res = await fetch('/api/weekly-plan?email=' + encodeURIComponent(currentUser.email));
+      const plan = await res.json();
+      const container = document.getElementById('weeklyPlanContainer');
+      if (!plan.days || !plan.days.length) {
+        container.innerHTML = '<p style="color:#aaa">No plan data yet. Start battling!</p>';
+        return;
+      }
+      let html = '';
+      plan.days.forEach(d => {
+        const percent = d.target > 0 ? Math.min(100, Math.round((d.done / d.target) * 100)) : 0;
+        const overTarget = d.target > 0 && d.done >= d.target;
+        const barClass = d.is_rest ? 'rest' : (overTarget ? 'over' : '');
+        const statusText = d.is_rest ? 'REST' : (overTarget ? 'Crushed!' : (d.done > 0 ? `${d.done}/${d.target}` : '0/' + d.target));
+        const todayClass = d.is_today ? ' today' : '';
+        const restClass = d.is_rest ? ' rest-day' : '';
+        html += `<div class="day-row${todayClass}${restClass}">
+          <span class="day-label">${d.is_rest ? '😴' : '💪'} ${d.day}</span>
+          <span class="day-date">${d.date.slice(5)}</span>
+          <div class="progress-container"><div class="progress-bar ${barClass}" style="width:${d.is_rest ? 0 : percent}%"></div></div>
+          <span class="day-status">${statusText}</span>
+        </div>`;
+      });
+      container.innerHTML = html;
+    } catch(e) {
+      document.getElementById('weeklyPlanContainer').innerHTML = '<p style="color:#aaa">Could not load plan.</p>';
+    }
+  }
 
   // ---------- CHALLENGE START ----------
   async function startChallenge(mode) {
@@ -438,7 +539,6 @@ FRONTEND_HTML = r"""
     document.getElementById('battleResultUI').style.display='none';
     if (bannerTimer) clearTimeout(bannerTimer);
     repCount = 0;
-    // Load ghost data if racing
     if (challengeMode === 'ghost' && currentUser) {
       try {
         const res = await fetch('/api/ghost?email=' + encodeURIComponent(currentUser.email));
@@ -492,9 +592,7 @@ FRONTEND_HTML = r"""
         const sa=movingAverage(angleBuffer,5);if(sa===null){requestAnimationFrame(detectPose);return}
         overlay.textContent=Math.round(sa)+'°';overlay.style.display='block';debugMsg.textContent='🟢 Active – '+Math.round(sa)+'°';
         const now=Date.now();if(aiState==='up'&&sa<90){aiState='down'}else if(aiState==='down'&&sa>150){if(now-lastRepTime>500){repCount++;document.getElementById('repCounter').textContent=repCount;lastRepTime=now;
-          // Record ghost timestamp
           if (battleStartTime > 0) { ghostTimestamps.push((now - battleStartTime) / 1000); }
-          // Update ghost overlay if racing
           if (ghostData && ghostData.timestamps) {
             const elapsed = (now - battleStartTime) / 1000;
             let ghostReps = 0;
@@ -520,17 +618,12 @@ FRONTEND_HTML = r"""
     document.getElementById('battleResultUI').style.display='block';document.getElementById('finalScore').textContent=repCount;
     document.getElementById('trashTalk').textContent=trashTalks[Math.floor(Math.random()*trashTalks.length)];
     const champ=document.getElementById('championText');champ.style.display='block';speakChampion();
-
-    // Send battle data, include ghost timestamps if this was a normal battle or a new best
     const payload = {name:currentUser.name, nationality:currentUser.nationality, email:currentUser.email, score:repCount, ghost_timestamps: ghostTimestamps.length > 0 ? ghostTimestamps : null};
     await fetch('/api/battle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-
-    // Ghost victory message
     if (ghostData && repCount > ghostData.score) {
       document.getElementById('trashTalk').textContent = "👻 GHOST DEFEATED! You're stronger than your past self!";
       speak("You defeated your ghost! New personal best recorded.");
     }
-
     setTimeout(()=>{champ.style.display='none'},5000);
     const stats=JSON.parse(localStorage.getItem('pushclash_stats')||'{}');const pb=stats.personalBest||0;
     let analysis=`You scored ${repCount}. `;if(repCount>=pb)analysis+="That's a new personal best! You're on fire!";else analysis+=`Your PB is ${pb}. You're getting closer!`;
