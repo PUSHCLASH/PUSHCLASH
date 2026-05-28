@@ -146,35 +146,39 @@ def target():
     avg = cur.fetchone()[0]
     return jsonify({'target':max(10,int(avg*1.2)+5),'todayDone':today_done})
 
-# ---------- ADVANCED WEEKLY PLAN ENDPOINT ----------
+# ---------- ROBUST WEEKLY PLAN ENDPOINT ----------
 @app.route('/api/weekly-plan')
 def weekly_plan():
     email = request.args.get('email','').strip()
-    if not email: return jsonify({'days':[], 'weekStart':'', 'weekEnd':''})
-    cur = get_db().cursor()
+    if not email:
+        return jsonify({'days':[], 'weekStart':'', 'weekEnd':''})
+
+    db = get_db()
+    cur = db.cursor()
     today = datetime.now(timezone.utc).date()
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
 
+    # 1) Daily totals (cast timestamp to date for safe comparison)
     cur.execute("""
-        SELECT DATE(timestamp) as day, SUM(score) as total
+        SELECT timestamp::date as day, SUM(score) as total
         FROM battles
-        WHERE email=%s AND timestamp >= %s AND timestamp < %s
-        GROUP BY day
-    """, (email, monday.isoformat(), (sunday+timedelta(days=1)).isoformat()))
-    daily_data = {row['day']: row['total'] for row in cur.fetchall()}
+        WHERE email=%s AND timestamp::date >= %s AND timestamp::date <= %s
+        GROUP BY timestamp::date
+    """, (email, monday, sunday))
+    daily_data = {row['day']: int(row['total']) for row in cur.fetchall()}
 
+    # 2) Average daily push‑ups last 7 days
     seven_days_ago = today - timedelta(days=7)
     cur.execute("""
-        SELECT COALESCE(AVG(daily_total),0)
-        FROM (
+        SELECT COALESCE(AVG(daily_total), 0) FROM (
             SELECT SUM(score) as daily_total
             FROM battles
             WHERE email=%s AND timestamp >= %s
             GROUP BY DATE(timestamp)
         ) sub
     """, (email, seven_days_ago))
-    avg = cur.fetchone()[0]
+    avg = float(cur.fetchone()[0])   # convert Decimal → float safely
     base_target = max(10, int(avg * 1.2) + 5)
 
     days_names = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
@@ -182,9 +186,9 @@ def weekly_plan():
     for i in range(7):
         day_date = monday + timedelta(days=i)
         day_name = days_names[i]
-        is_rest = (day_name == 'Wed' or day_name == 'Sun')
+        is_rest = (day_name in ('Wed','Sun'))
         target = 0 if is_rest else base_target
-        done = int(daily_data.get(day_date, 0))
+        done = daily_data.get(day_date, 0)
         days.append({
             'day': day_name,
             'date': day_date.isoformat(),
@@ -224,7 +228,7 @@ def service_worker():
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (fixed weekly plan loading) ----------
+# ---------- Frontend (unchanged) ----------
 FRONTEND_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -484,7 +488,6 @@ FRONTEND_HTML = r"""
     const container=document.getElementById('recentBattlesList');
     if(!data.recentBattles.length){container.innerHTML='<p style="color:#aaa">No battles yet.</p>';}
     else{container.innerHTML=data.recentBattles.map(b=>`<div class="recent-item"><span>🔥 ${b.score}</span><span class="small">${b.date}</span></div>`).join('');}
-    // Load advanced weekly plan
     loadWeeklyPlan();
     showScreen('statsScreen');
   }
@@ -493,6 +496,7 @@ FRONTEND_HTML = r"""
     if (!currentUser) return;
     try {
       const res = await fetch('/api/weekly-plan?email=' + encodeURIComponent(currentUser.email));
+      if (!res.ok) throw new Error('Server error');
       const plan = await res.json();
       const container = document.getElementById('weeklyPlanContainer');
       if (!plan.days || !plan.days.length) {
