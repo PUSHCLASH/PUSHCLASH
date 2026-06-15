@@ -1,6 +1,6 @@
 flask
 psycopg2-binary
 flask-socketio
-
+gunicorn
 
 
