@@ -146,20 +146,16 @@ def target():
     avg = cur.fetchone()[0]
     return jsonify({'target':max(10,int(avg*1.2)+5),'todayDone':today_done})
 
-# ---------- ROBUST WEEKLY PLAN ENDPOINT ----------
 @app.route('/api/weekly-plan')
 def weekly_plan():
     email = request.args.get('email','').strip()
     if not email:
         return jsonify({'days':[], 'weekStart':'', 'weekEnd':''})
-
     db = get_db()
     cur = db.cursor()
     today = datetime.now(timezone.utc).date()
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
-
-    # 1) Daily totals (cast timestamp to date for safe comparison)
     cur.execute("""
         SELECT timestamp::date as day, SUM(score) as total
         FROM battles
@@ -167,8 +163,6 @@ def weekly_plan():
         GROUP BY timestamp::date
     """, (email, monday, sunday))
     daily_data = {row['day']: int(row['total']) for row in cur.fetchall()}
-
-    # 2) Average daily push‑ups last 7 days
     seven_days_ago = today - timedelta(days=7)
     cur.execute("""
         SELECT COALESCE(AVG(daily_total), 0) FROM (
@@ -178,9 +172,8 @@ def weekly_plan():
             GROUP BY DATE(timestamp)
         ) sub
     """, (email, seven_days_ago))
-    avg = float(cur.fetchone()[0])   # convert Decimal → float safely
+    avg = float(cur.fetchone()[0])
     base_target = max(10, int(avg * 1.2) + 5)
-
     days_names = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
     days = []
     for i in range(7):
@@ -197,7 +190,6 @@ def weekly_plan():
             'is_rest': is_rest,
             'is_today': day_date == today
         })
-
     return jsonify({
         'days': days,
         'weekStart': monday.isoformat(),
@@ -224,11 +216,11 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     return app.response_class(
-        response="""const CACHE_NAME='pushclash-v5';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json']))) });self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))) });self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));});""",
+        response="""const CACHE_NAME='pushclash-v5';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json'])))});self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));});""",
         mimetype='application/javascript'
     )
 
-# ---------- Frontend (unchanged) ----------
+# ---------- Frontend ----------
 FRONTEND_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -266,6 +258,9 @@ FRONTEND_HTML = r"""
   #aiCameraUI canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2;background:transparent !important}
   .angle-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;font-weight:800;color:#0ff;text-shadow:0 0 30px cyan;pointer-events:none;z-index:5}
   .rep-flash{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:3rem;font-weight:800;color:#0f0;text-shadow:0 0 30px green;z-index:6;animation:fadeInOut .8s ease}
+  .form-feedback{position:absolute;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#ffcc00;padding:8px 16px;border-radius:10px;font-size:0.9rem;font-weight:bold;z-index:10;border:1px solid #ffcc00;text-align:center;max-width:90%;transition:all 0.3s ease}
+  .form-feedback.good{color:#00ff88;border-color:#00ff88}
+  .form-feedback.bad{color:#ff4444;border-color:#ff4444}
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.8);color:#fa0;padding:6px 12px;border-radius:8px;font-size:16px;font-weight:bold;z-index:7;pointer-events:none}
   .motivation-banner{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:95%;background:rgba(0,0,0,0.85);border:1px solid #ff4500;border-radius:10px;padding:10px 13px;text-align:center;font-size:0.8rem;color:#ccc;line-height:1.4;z-index:9999 !important;display:none}
@@ -331,7 +326,6 @@ FRONTEND_HTML = r"""
   .stats-card .big-num{font-size:2rem;font-weight:bold;color:#0ff}
   .recent-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #333}
 
-  /* Advanced weekly plan styles */
   .weekly-plan-container{background:rgba(0,0,0,0.7);border-radius:16px;padding:16px;margin:15px 0}
   .day-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;position:relative}
   .day-row:last-child{border-bottom:none}
@@ -413,6 +407,7 @@ FRONTEND_HTML = r"""
         <video id="webcam" autoplay playsinline muted></video>
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
+        <div class="form-feedback" id="formFeedback"></div>
         <div class="debug-msg" id="debugMsg"></div>
         <div class="motivation-banner" id="motivationBanner"><strong>👁️ THE AI IS WATCHING EVERY REP 👁️</strong><br>Start your push‑ups NOW! No distractions, no excuses — pure power only. The AI referee sees every move and counts every clean rep. Show the world what you're made of! 💪🚀</div>
         <div class="ghost-overlay" id="ghostOverlay"><span class="ghost-icon">👻</span><span class="ghost-count" id="ghostCount">0</span></div>
@@ -442,6 +437,9 @@ FRONTEND_HTML = r"""
   let ghostTimestamps = [];
   let battleStartTime = 0;
   let ghostData = null;
+  let formFeedbackCooldown = 0;
+  let lastFeedbackTime = 0;
+  let feedbackHistory = [];
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
@@ -524,6 +522,93 @@ FRONTEND_HTML = r"""
     }
   }
 
+  // ---------- Form Coaching Functions ----------
+  function analyzeForm(kp) {
+    // Get keypoints
+    const leftShoulder = kp[5], rightShoulder = kp[6];
+    const leftElbow = kp[7], rightElbow = kp[8];
+    const leftWrist = kp[9], rightWrist = kp[10];
+    const leftHip = kp[11], rightHip = kp[12];
+    const leftKnee = kp[13], rightKnee = kp[14];
+    const leftAnkle = kp[15], rightAnkle = kp[16];
+    
+    // Check if all keypoints are visible
+    if (!leftShoulder || !rightShoulder || !leftElbow || !rightElbow || 
+        !leftWrist || !rightWrist || !leftHip || !rightHip) {
+      return null;
+    }
+    
+    // Calculate angles
+    const leftElbowAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+    const rightElbowAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+    const avgElbowAngle = (leftElbowAngle + rightElbowAngle) / 2;
+    
+    // Check shoulder alignment (for flaring)
+    const shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x);
+    const elbowWidth = Math.abs(leftElbow.x - rightElbow.x);
+    const flaringRatio = elbowWidth / shoulderWidth;
+    
+    // Check hip alignment (for sagging)
+    const hipY = (leftHip.y + rightHip.y) / 2;
+    const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+    const hipToShoulderRatio = (hipY - shoulderY) / shoulderY;
+    
+    // Check depth (based on elbow angle)
+    const isDeepEnough = avgElbowAngle < 100;
+    
+    // Determine feedback
+    let feedbacks = [];
+    let priority = 'good';
+    
+    // Elbow flaring check
+    if (flaringRatio > 1.5 && avgElbowAngle < 140) {
+      feedbacks.push("Keep your elbows close to your body!");
+      priority = 'bad';
+    }
+    
+    // Depth check (only when going down)
+    if (avgElbowAngle < 120 && avgElbowAngle > 70) {
+      if (avgElbowAngle > 95) {
+        feedbacks.push("Go deeper! Chest to the ground!");
+        priority = 'bad';
+      } else if (avgElbowAngle < 75) {
+        feedbacks.push("Perfect depth! Keep this form!");
+        priority = 'good';
+      }
+    }
+    
+    // Hip sagging check
+    if (hipToShoulderRatio > 0.6 && avgElbowAngle < 140) {
+      feedbacks.push("Your hips are sagging! Tighten your core!");
+      priority = 'bad';
+    }
+    
+    // Perfect form
+    if (feedbacks.length === 0 && avgElbowAngle > 150) {
+      feedbacks.push("Great form! Keep it up!");
+      priority = 'good';
+    }
+    
+    return {
+      messages: feedbacks,
+      priority: priority,
+      elbowAngle: avgElbowAngle,
+      depth: isDeepEnough
+    };
+  }
+
+  function showFormFeedback(feedback) {
+    if (!feedback || feedback.messages.length === 0) {
+      document.getElementById('formFeedback').style.display = 'none';
+      return;
+    }
+    
+    const el = document.getElementById('formFeedback');
+    el.textContent = feedback.messages[0];
+    el.className = 'form-feedback ' + feedback.priority;
+    el.style.display = 'block';
+  }
+
   // ---------- CHALLENGE START ----------
   async function startChallenge(mode) {
     challengeMode = mode || 'normal';
@@ -535,6 +620,7 @@ FRONTEND_HTML = r"""
     document.getElementById('motivationBanner').style.display='none';
     document.getElementById('motivationBanner').classList.remove('fade-out');
     document.getElementById('battleResultUI').style.display='none';
+    document.getElementById('formFeedback').style.display = 'none';
     if (bannerTimer) clearTimeout(bannerTimer);
     repCount = 0;
     if (challengeMode === 'ghost' && currentUser) {
@@ -584,7 +670,24 @@ FRONTEND_HTML = r"""
     if(video.readyState<2){requestAnimationFrame(detectPose);return}
     const poses=await aiDetector.estimatePoses(video,{flipHorizontal:false});ctx.clearRect(0,0,canvas.width,canvas.height);
     if(poses.length>0){
-      const kp=poses[0].keypoints;drawSkeleton(ctx,kp);const ls=kp[5],rs=kp[6],le=kp[7],lw=kp[9],re=kp[8],rw=kp[10];
+      const kp=poses[0].keypoints;drawSkeleton(ctx,kp);
+      
+      // --- Form Coaching ---
+      const formFeedback = analyzeForm(kp);
+      if (formFeedback) {
+        showFormFeedback(formFeedback);
+        
+        // Speak feedback if priority is 'bad' (with cooldown)
+        const now = Date.now();
+        if (formFeedback.priority === 'bad' && now - lastFeedbackTime > 3000) {
+          if (formFeedback.messages.length > 0) {
+            speak(formFeedback.messages[0]);
+            lastFeedbackTime = now;
+          }
+        }
+      }
+      
+      const ls=kp[5],rs=kp[6],le=kp[7],lw=kp[9],re=kp[8],rw=kp[10];
       if(ls&&le&&lw&&rs&&re&&rw){
         const la=calculateAngle(ls,le,lw),ra=calculateAngle(rs,re,rw),raw=(la+ra)/2;angleBuffer.push(raw);if(angleBuffer.length>5)angleBuffer.shift();
         const sa=movingAverage(angleBuffer,5);if(sa===null){requestAnimationFrame(detectPose);return}
@@ -613,6 +716,7 @@ FRONTEND_HTML = r"""
     if(aiStream){aiStream.getTracks().forEach(t=>t.stop());aiStream=null}if(bannerTimer)clearTimeout(bannerTimer);
     document.getElementById('challengeActiveUI').style.display='none';document.getElementById('motivationBanner').style.display='none';
     document.getElementById('ghostOverlay').style.display='none';
+    document.getElementById('formFeedback').style.display = 'none';
     document.getElementById('battleResultUI').style.display='block';document.getElementById('finalScore').textContent=repCount;
     document.getElementById('trashTalk').textContent=trashTalks[Math.floor(Math.random()*trashTalks.length)];
     const champ=document.getElementById('championText');champ.style.display='block';speakChampion();
