@@ -146,16 +146,20 @@ def target():
     avg = cur.fetchone()[0]
     return jsonify({'target':max(10,int(avg*1.2)+5),'todayDone':today_done})
 
+# ---------- ROBUST WEEKLY PLAN ENDPOINT ----------
 @app.route('/api/weekly-plan')
 def weekly_plan():
     email = request.args.get('email','').strip()
     if not email:
         return jsonify({'days':[], 'weekStart':'', 'weekEnd':''})
+
     db = get_db()
     cur = db.cursor()
     today = datetime.now(timezone.utc).date()
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
+
+    # 1) Daily totals (cast timestamp to date for safe comparison)
     cur.execute("""
         SELECT timestamp::date as day, SUM(score) as total
         FROM battles
@@ -163,6 +167,8 @@ def weekly_plan():
         GROUP BY timestamp::date
     """, (email, monday, sunday))
     daily_data = {row['day']: int(row['total']) for row in cur.fetchall()}
+
+    # 2) Average daily push‑ups last 7 days
     seven_days_ago = today - timedelta(days=7)
     cur.execute("""
         SELECT COALESCE(AVG(daily_total), 0) FROM (
@@ -172,8 +178,9 @@ def weekly_plan():
             GROUP BY DATE(timestamp)
         ) sub
     """, (email, seven_days_ago))
-    avg = float(cur.fetchone()[0])
+    avg = float(cur.fetchone()[0])   # convert Decimal → float safely
     base_target = max(10, int(avg * 1.2) + 5)
+
     days_names = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
     days = []
     for i in range(7):
@@ -190,6 +197,7 @@ def weekly_plan():
             'is_rest': is_rest,
             'is_today': day_date == today
         })
+
     return jsonify({
         'days': days,
         'weekStart': monday.isoformat(),
@@ -216,11 +224,11 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     return app.response_class(
-        response="""const CACHE_NAME='pushclash-v5';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json'])))});self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));});""",
+        response="""const CACHE_NAME='pushclash-v5';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/manifest.json']))) });self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))) });self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));});""",
         mimetype='application/javascript'
     )
 
-# ---------- Frontend ----------
+# ---------- Frontend (unchanged) ----------
 FRONTEND_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -258,9 +266,6 @@ FRONTEND_HTML = r"""
   #aiCameraUI canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2;background:transparent !important}
   .angle-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;font-weight:800;color:#0ff;text-shadow:0 0 30px cyan;pointer-events:none;z-index:5}
   .rep-flash{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:3rem;font-weight:800;color:#0f0;text-shadow:0 0 30px green;z-index:6;animation:fadeInOut .8s ease}
-  .form-feedback{position:absolute;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#ffcc00;padding:8px 16px;border-radius:10px;font-size:0.9rem;font-weight:bold;z-index:10;border:1px solid #ffcc00;text-align:center;max-width:90%;transition:all 0.3s ease}
-  .form-feedback.good{color:#00ff88;border-color:#00ff88}
-  .form-feedback.bad{color:#ff4444;border-color:#ff4444}
   @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
   .debug-msg{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.8);color:#fa0;padding:6px 12px;border-radius:8px;font-size:16px;font-weight:bold;z-index:7;pointer-events:none}
   .motivation-banner{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:95%;background:rgba(0,0,0,0.85);border:1px solid #ff4500;border-radius:10px;padding:10px 13px;text-align:center;font-size:0.8rem;color:#ccc;line-height:1.4;z-index:9999 !important;display:none}
@@ -273,16 +278,29 @@ FRONTEND_HTML = r"""
   .ghost-overlay .ghost-count{font-weight:bold;color:#aaa;margin-left:5px}
   .ghost-beaten{color:#0f0 !important}
 
-  /* ---------- NEW FLOWER INTRO ---------- */
-  .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
-  #flowerCanvas{position:absolute;top:0;left:0;width:100%;height:100%;z-index:1}
-  .intro-content{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none;padding:20px}
-  .intro-title-main{font-size:3.4rem;font-weight:900;color:transparent;background:linear-gradient(135deg,#00ffff,#00bfff,#00ffff);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 30px #00ffff);animation:titleGlow 2s ease-in-out infinite, titleEntrance 1s ease forwards;letter-spacing:2px}
-  @keyframes titleGlow{0%,100%{filter:drop-shadow(0 0 25px #00ffff)}50%{filter:drop-shadow(0 0 45px #00ffff) drop-shadow(0 0 60px #00bfff)}}
+  .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:radial-gradient(circle at 50% 40%, #0d071a 0%, #000 100%);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+  .intro-scene{display:flex;flex-direction:column;align-items:center;justify-content:space-between;height:100%;width:100%;padding:60px 20px 40px}
+  .intro-title-top{text-align:center;z-index:10}
+  .intro-title-main{font-size:3.2rem;font-weight:900;color:transparent;background:linear-gradient(135deg,#ff4500,#ff00ff,#ff4500);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 25px #ff00ff);animation:titleGlow 2s ease-in-out infinite, titleEntrance 0.8s ease forwards}
+  .luffy-image-container{position:relative;width:220px;height:220px;display:flex;align-items:center;justify-content:center;z-index:2}
+  .luffy-image{width:190px;height:190px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.15);box-shadow:0 0 40px rgba(255,69,0,0.4),0 0 80px rgba(255,0,255,0.3),0 0 120px rgba(255,100,0,0.2);animation:cinematicEntrance 1.4s ease forwards, cinematicPulse 2.5s 1.4s ease-in-out infinite}
+  @keyframes cinematicEntrance{0%{transform:scale(0.3) translateY(30px);opacity:0;filter:brightness(0.3)}60%{transform:scale(1.05) translateY(-5px);opacity:1;filter:brightness(1.2)}100%{transform:scale(1) translateY(0);opacity:1;filter:brightness(1)}}
+  @keyframes cinematicPulse{0%,100%{box-shadow:0 0 40px rgba(255,69,0,0.4),0 0 80px rgba(255,0,255,0.3),0 0 120px rgba(255,100,0,0.2)}50%{box-shadow:0 0 60px rgba(255,69,0,0.7),0 0 100px rgba(255,0,255,0.5),0 0 140px rgba(255,100,0,0.4)}}
+  @keyframes titleGlow{0%,100%{filter:drop-shadow(0 0 25px #ff00ff)}50%{filter:drop-shadow(0 0 45px #ff4500) drop-shadow(0 0 60px #ff00ff)}}
   @keyframes titleEntrance{0%{opacity:0;transform:translateY(-20px) scale(0.7)}100%{opacity:1;transform:translateY(0) scale(1)}}
-  .intro-tagline{font-size:1rem;color:#00ffff;letter-spacing:4px;animation:tagAppear 1s 0.8s ease forwards;opacity:0;text-align:center;margin-top:20px;text-shadow:0 0 15px #00ffff;font-weight:bold}
+  .particle{position:absolute;width:4px;height:4px;border-radius:50%;background:#ff4500;animation:floatParticle 3s ease-in-out infinite;opacity:0;z-index:0}
+  .particle:nth-child(1){top:15%;left:12%;animation-delay:0s;background:#ff00ff;width:5px;height:5px}
+  .particle:nth-child(2){top:22%;right:10%;animation-delay:0.6s}
+  .particle:nth-child(3){top:50%;left:6%;animation-delay:1.1s;background:#0ff;width:6px;height:6px}
+  .particle:nth-child(4){top:58%;right:8%;animation-delay:1.6s;background:#ff4500}
+  .particle:nth-child(5){top:38%;left:22%;animation-delay:0.9s;background:#ff00ff;width:5px;height:5px}
+  .particle:nth-child(6){top:42%;right:18%;animation-delay:1.3s}
+  .particle:nth-child(7){top:68%;left:16%;animation-delay:0.4s;background:#0ff;width:4px;height:4px}
+  .particle:nth-child(8){top:72%;right:12%;animation-delay:1.9s;background:#ff4500}
+  @keyframes floatParticle{0%{opacity:0;transform:translateY(0) scale(0)}30%{opacity:0.8;transform:translateY(-25px) scale(1)}100%{opacity:0;transform:translateY(50px) scale(0.3)}}
+  .intro-tagline{font-size:1rem;color:#ccc;letter-spacing:3px;animation:tagAppear 1s 0.5s ease forwards;opacity:0;text-align:center;margin-top:10px}
   @keyframes tagAppear{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
-  .skip-btn{position:absolute;top:20px;right:20px;background:rgba(0,255,255,0.1);color:#00ffff;padding:8px 18px;border-radius:20px;font-size:0.8rem;cursor:pointer;z-index:999;border:1px solid rgba(0,255,255,0.4);pointer-events:auto}
+  .skip-btn{position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.1);color:#aaa;padding:6px 16px;border-radius:20px;font-size:0.8rem;cursor:pointer;z-index:999}
   .intro-fadeout{animation:fadeOutIntro 0.8s ease forwards}
   @keyframes fadeOutIntro{0%{opacity:1}100%{opacity:0;visibility:hidden}}
 
@@ -313,6 +331,7 @@ FRONTEND_HTML = r"""
   .stats-card .big-num{font-size:2rem;font-weight:bold;color:#0ff}
   .recent-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #333}
 
+  /* Advanced weekly plan styles */
   .weekly-plan-container{background:rgba(0,0,0,0.7);border-radius:16px;padding:16px;margin:15px 0}
   .day-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;position:relative}
   .day-row:last-child{border-bottom:none}
@@ -334,13 +353,17 @@ FRONTEND_HTML = r"""
 </head>
 <body>
 
-<!-- ============ NEW FLOWER INTRO ============ -->
+<!-- INTRO -->
 <div id="introOverlay" class="intro-overlay">
-  <canvas id="flowerCanvas"></canvas>
   <div class="skip-btn" onclick="skipIntro()">Tap to skip →</div>
-  <div class="intro-content">
-    <div class="intro-title-main">PUSHCLASH</div>
-    <div class="intro-tagline">⚡ AWAKEN THE WARRIOR ⚡</div>
+  <div class="intro-scene">
+    <div class="intro-title-top"><div class="intro-title-main">PUSHCLASH</div></div>
+    <div class="luffy-image-container">
+      <img class="luffy-image" src="https://raw.githubusercontent.com/PUSHCLASH/PUSHCLASH/main/luffy%20image.jpeg" alt="Luffy Gear 5">
+      <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
+      <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
+    </div>
+    <div class="intro-tagline">⚡ GEAR 5 — AWAKENED ⚡</div>
   </div>
 </div>
 
@@ -390,7 +413,6 @@ FRONTEND_HTML = r"""
         <video id="webcam" autoplay playsinline muted></video>
         <div class="angle-overlay" id="angleOverlay"></div>
         <div class="rep-flash" id="repFlash" style="display:none">REP!</div>
-        <div class="form-feedback" id="formFeedback"></div>
         <div class="debug-msg" id="debugMsg"></div>
         <div class="motivation-banner" id="motivationBanner"><strong>👁️ THE AI IS WATCHING EVERY REP 👁️</strong><br>Start your push‑ups NOW! No distractions, no excuses — pure power only. The AI referee sees every move and counts every clean rep. Show the world what you're made of! 💪🚀</div>
         <div class="ghost-overlay" id="ghostOverlay"><span class="ghost-icon">👻</span><span class="ghost-count" id="ghostCount">0</span></div>
@@ -420,94 +442,13 @@ FRONTEND_HTML = r"""
   let ghostTimestamps = [];
   let battleStartTime = 0;
   let ghostData = null;
-  let formFeedbackCooldown = 0;
-  let lastFeedbackTime = 0;
-  let feedbackHistory = [];
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
-  // ---------- FLOWER INTRO ANIMATION ----------
-  let flowerAnimId = null;
-  function startFlowerIntro() {
-    const canvas = document.getElementById('flowerCanvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    let W = canvas.width = window.innerWidth;
-    let H = canvas.height = window.innerHeight;
-    let cx = W / 2, cy = H / 2;
-    let Cw = W / 2, Ch = H / 2;
-    // Base flower radius scales with screen size
-    let baseR = Math.min(W, H) * 0.35;
-    let Rx = baseR, Ry = baseR;
-    let kx = 6, ky = 6; // symmetry (petal count)
-    let frames = 0;
-
-    // Resize handler
-    function onResize() {
-      W = canvas.width = window.innerWidth;
-      H = canvas.height = window.innerHeight;
-      cx = W / 2; cy = H / 2;
-      Cw = W / 2; Ch = H / 2;
-      baseR = Math.min(W, H) * 0.35;
-      Rx = baseR; Ry = baseR;
-    }
-    window.addEventListener('resize', onResize);
-
-    // Translate to center so we draw around origin
-    function draw() {
-      frames += 0.3;
-      // Fade trail effect (semi-transparent black) - creates the glowing trails
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
-      ctx.fillRect(0, 0, W, H);
-
-      ctx.save();
-      ctx.translate(cx, cy);
-
-      // Draw multiple layered flowers for richness
-      for (let layer = 0; layer < 3; layer++) {
-        const layerOffset = layer * 0.15;
-        const t = frames * 0.05 + layerOffset;
-        const rx = Rx * Math.abs(Math.cos(t)) + 50;
-        const ry = Ry * Math.abs(Math.sin(t)) + 50;
-
-        // Draw many curves per frame to form the flower
-        for (let i = 0; i < 30; i++) {
-          const tt = t + i * 0.05;
-          const x  = rx * Math.sin(kx * tt + Math.PI / 2);
-          const y  = ry * Math.sin(ky * tt + Math.PI / 2);
-          const x1 = rx * Math.sin(kx * tt + Math.PI);
-          const y1 = -ry * Math.sin(ky * tt + Math.PI);
-          const x2 = rx * Math.sin(kx * tt);
-          const y2 = -ry * Math.sin(ky * tt);
-
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.quadraticCurveTo(x1, y1, x2, y2);
-
-          // Cyan glow with slight variation per layer
-          const alpha = 0.5 - layer * 0.12;
-          const hueShift = layer * 10;
-          ctx.strokeStyle = `hsla(${180 + hueShift}, 100%, 60%, ${alpha})`;
-          ctx.lineWidth = 1.2;
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.stroke();
-        }
-      }
-
-      ctx.restore();
-      flowerAnimId = requestAnimationFrame(draw);
-    }
-    draw();
-  }
-  function stopFlowerIntro() {
-    if (flowerAnimId) { cancelAnimationFrame(flowerAnimId); flowerAnimId = null; }
-  }
-
   // ---------- Intro ----------
-  function skipIntro() { clearTimeout(window._introTimer); const overlay = document.getElementById('introOverlay'); overlay.classList.add('intro-fadeout'); setTimeout(() => { overlay.style.display = 'none'; stopFlowerIntro(); proceedToApp(); }, 800); }
+  function skipIntro() { clearTimeout(window._introTimer); const overlay = document.getElementById('introOverlay'); overlay.classList.add('intro-fadeout'); setTimeout(() => { overlay.style.display = 'none'; proceedToApp(); }, 800); }
   function proceedToApp() { document.getElementById('appContainer').classList.add('visible'); currentUser = JSON.parse(localStorage.getItem('pushclash_user')); if (currentUser) { showScreen('dashboardScreen'); loadStats(); } else { showScreen('setupScreen'); } }
-  window.addEventListener('load', () => { const overlay = document.getElementById('introOverlay'); overlay.style.display = 'flex'; startFlowerIntro(); window._introTimer = setTimeout(() => { overlay.classList.add('intro-fadeout'); setTimeout(() => { overlay.style.display = 'none'; stopFlowerIntro(); proceedToApp(); }, 800); }, 5500); });
+  window.addEventListener('load', () => { const overlay = document.getElementById('introOverlay'); overlay.style.display = 'flex'; window._introTimer = setTimeout(() => { overlay.classList.add('intro-fadeout'); setTimeout(() => { overlay.style.display = 'none'; proceedToApp(); }, 800); }, 5000); });
 
   // ---------- Active user count ----------
   async function refreshActiveCount() { try { const res = await fetch('/api/active_users'); const data = await res.json(); document.getElementById('activeUserCount').textContent = data.count; } catch(e) {} }
@@ -583,70 +524,6 @@ FRONTEND_HTML = r"""
     }
   }
 
-  // ---------- Form Coaching Functions ----------
-  function analyzeForm(kp) {
-    const leftShoulder = kp[5], rightShoulder = kp[6];
-    const leftElbow = kp[7], rightElbow = kp[8];
-    const leftWrist = kp[9], rightWrist = kp[10];
-    const leftHip = kp[11], rightHip = kp[12];
-    const leftKnee = kp[13], rightKnee = kp[14];
-    const leftAnkle = kp[15], rightAnkle = kp[16];
-    if (!leftShoulder || !rightShoulder || !leftElbow || !rightElbow || 
-        !leftWrist || !rightWrist || !leftHip || !rightHip) {
-      return null;
-    }
-    const leftElbowAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-    const rightElbowAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-    const avgElbowAngle = (leftElbowAngle + rightElbowAngle) / 2;
-    const shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x);
-    const elbowWidth = Math.abs(leftElbow.x - rightElbow.x);
-    const flaringRatio = elbowWidth / shoulderWidth;
-    const hipY = (leftHip.y + rightHip.y) / 2;
-    const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-    const hipToShoulderRatio = (hipY - shoulderY) / shoulderY;
-    const isDeepEnough = avgElbowAngle < 100;
-    let feedbacks = [];
-    let priority = 'good';
-    if (flaringRatio > 1.5 && avgElbowAngle < 140) {
-      feedbacks.push("Keep your elbows close to your body!");
-      priority = 'bad';
-    }
-    if (avgElbowAngle < 120 && avgElbowAngle > 70) {
-      if (avgElbowAngle > 95) {
-        feedbacks.push("Go deeper! Chest to the ground!");
-        priority = 'bad';
-      } else if (avgElbowAngle < 75) {
-        feedbacks.push("Perfect depth! Keep this form!");
-        priority = 'good';
-      }
-    }
-    if (hipToShoulderRatio > 0.6 && avgElbowAngle < 140) {
-      feedbacks.push("Your hips are sagging! Tighten your core!");
-      priority = 'bad';
-    }
-    if (feedbacks.length === 0 && avgElbowAngle > 150) {
-      feedbacks.push("Great form! Keep it up!");
-      priority = 'good';
-    }
-    return {
-      messages: feedbacks,
-      priority: priority,
-      elbowAngle: avgElbowAngle,
-      depth: isDeepEnough
-    };
-  }
-
-  function showFormFeedback(feedback) {
-    if (!feedback || feedback.messages.length === 0) {
-      document.getElementById('formFeedback').style.display = 'none';
-      return;
-    }
-    const el = document.getElementById('formFeedback');
-    el.textContent = feedback.messages[0];
-    el.className = 'form-feedback ' + feedback.priority;
-    el.style.display = 'block';
-  }
-
   // ---------- CHALLENGE START ----------
   async function startChallenge(mode) {
     challengeMode = mode || 'normal';
@@ -658,7 +535,6 @@ FRONTEND_HTML = r"""
     document.getElementById('motivationBanner').style.display='none';
     document.getElementById('motivationBanner').classList.remove('fade-out');
     document.getElementById('battleResultUI').style.display='none';
-    document.getElementById('formFeedback').style.display = 'none';
     if (bannerTimer) clearTimeout(bannerTimer);
     repCount = 0;
     if (challengeMode === 'ghost' && currentUser) {
@@ -708,19 +584,7 @@ FRONTEND_HTML = r"""
     if(video.readyState<2){requestAnimationFrame(detectPose);return}
     const poses=await aiDetector.estimatePoses(video,{flipHorizontal:false});ctx.clearRect(0,0,canvas.width,canvas.height);
     if(poses.length>0){
-      const kp=poses[0].keypoints;drawSkeleton(ctx,kp);
-      const formFeedback = analyzeForm(kp);
-      if (formFeedback) {
-        showFormFeedback(formFeedback);
-        const now = Date.now();
-        if (formFeedback.priority === 'bad' && now - lastFeedbackTime > 3000) {
-          if (formFeedback.messages.length > 0) {
-            speak(formFeedback.messages[0]);
-            lastFeedbackTime = now;
-          }
-        }
-      }
-      const ls=kp[5],rs=kp[6],le=kp[7],lw=kp[9],re=kp[8],rw=kp[10];
+      const kp=poses[0].keypoints;drawSkeleton(ctx,kp);const ls=kp[5],rs=kp[6],le=kp[7],lw=kp[9],re=kp[8],rw=kp[10];
       if(ls&&le&&lw&&rs&&re&&rw){
         const la=calculateAngle(ls,le,lw),ra=calculateAngle(rs,re,rw),raw=(la+ra)/2;angleBuffer.push(raw);if(angleBuffer.length>5)angleBuffer.shift();
         const sa=movingAverage(angleBuffer,5);if(sa===null){requestAnimationFrame(detectPose);return}
@@ -749,7 +613,6 @@ FRONTEND_HTML = r"""
     if(aiStream){aiStream.getTracks().forEach(t=>t.stop());aiStream=null}if(bannerTimer)clearTimeout(bannerTimer);
     document.getElementById('challengeActiveUI').style.display='none';document.getElementById('motivationBanner').style.display='none';
     document.getElementById('ghostOverlay').style.display='none';
-    document.getElementById('formFeedback').style.display = 'none';
     document.getElementById('battleResultUI').style.display='block';document.getElementById('finalScore').textContent=repCount;
     document.getElementById('trashTalk').textContent=trashTalks[Math.floor(Math.random()*trashTalks.length)];
     const champ=document.getElementById('championText');champ.style.display='block';speakChampion();
