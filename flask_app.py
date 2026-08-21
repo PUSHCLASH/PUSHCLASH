@@ -687,12 +687,18 @@ FRONTEND_HTML = r"""
         }
       }
       
+      // FIX: only trust keypoints with decent confidence, widen the smoothing
+      // window a touch, and relax the up/down thresholds so a rep reliably
+      // fires even when the wrist/elbow briefly lose tracking at the bottom
+      // of the movement (very common on a front-facing phone camera).
+      const MIN_KP_SCORE = 0.35;
       const ls=kp[5],rs=kp[6],le=kp[7],lw=kp[9],re=kp[8],rw=kp[10];
-      if(ls&&le&&lw&&rs&&re&&rw){
-        const la=calculateAngle(ls,le,lw),ra=calculateAngle(rs,re,rw),raw=(la+ra)/2;angleBuffer.push(raw);if(angleBuffer.length>5)angleBuffer.shift();
-        const sa=movingAverage(angleBuffer,5);if(sa===null){requestAnimationFrame(detectPose);return}
+      const kpOk = (p) => p && p.score !== undefined && p.score > MIN_KP_SCORE;
+      if(kpOk(ls)&&kpOk(le)&&kpOk(lw)&&kpOk(rs)&&kpOk(re)&&kpOk(rw)){
+        const la=calculateAngle(ls,le,lw),ra=calculateAngle(rs,re,rw),raw=(la+ra)/2;angleBuffer.push(raw);if(angleBuffer.length>6)angleBuffer.shift();
+        const sa=movingAverage(angleBuffer,6);if(sa===null){requestAnimationFrame(detectPose);return}
         overlay.textContent=Math.round(sa)+'°';overlay.style.display='block';debugMsg.textContent='🟢 Active – '+Math.round(sa)+'°';
-        const now=Date.now();if(aiState==='up'&&sa<90){aiState='down'}else if(aiState==='down'&&sa>150){if(now-lastRepTime>500){repCount++;document.getElementById('repCounter').textContent=repCount;lastRepTime=now;
+        const now=Date.now();if(aiState==='up'&&sa<105){aiState='down'}else if(aiState==='down'&&sa>140){if(now-lastRepTime>500){repCount++;document.getElementById('repCounter').textContent=repCount;lastRepTime=now;
           if (battleStartTime > 0) { ghostTimestamps.push((now - battleStartTime) / 1000); }
           if (ghostData && ghostData.timestamps) {
             const elapsed = (now - battleStartTime) / 1000;
