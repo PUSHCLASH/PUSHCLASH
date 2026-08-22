@@ -1,10 +1,11 @@
 import os
 import time
 import json
+import subprocess
 import psycopg2
 import psycopg2.extras
 from datetime import datetime, timedelta, timezone
-from flask import Flask, request, jsonify, g
+from flask import Flask, request, jsonify, g, Markup
 from threading import Lock
 
 app = Flask(__name__)
@@ -15,7 +16,8 @@ active_users_lock = Lock()
 INACTIVITY_LIMIT = 10
 
 def update_active_user(email):
-    with active_users_lock: active_users[email] = time.time()
+    with active_users_lock:
+        active_users[email] = time.time()
 
 def cleanup_active_users():
     now = time.time()
@@ -25,11 +27,13 @@ def cleanup_active_users():
 
 def get_active_count():
     cleanup_active_users()
-    with active_users_lock: return len(active_users)
+    with active_users_lock:
+        return len(active_users)
 
 # ---------- Database ----------
 DATABASE_URL = os.environ.get('DATABASE_URL')
-if not DATABASE_URL: raise RuntimeError("DATABASE_URL not set")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL not set")
 
 def get_db():
     if 'db' not in g:
@@ -40,7 +44,8 @@ def get_db():
 @app.teardown_appcontext
 def close_db(exception):
     db = g.pop('db', None)
-    if db: db.close()
+    if db:
+        db.close()
 
 def init_db():
     with app.app_context():
@@ -52,11 +57,67 @@ def init_db():
         )''')
         get_db().commit()
 
+# ---------- Progress endpoint (hackathon 24h view) ----------
+@app.route('/progress')
+def progress():
+    """
+    Show git commits from the last 24 hours. If git isn't available (e.g. on some deployed platforms),
+    return a friendly message explaining how to generate a PROGRESS-24H.md locally.
+    """
+    try:
+        # run git log for the last 24 hours
+        cmd = ["git", "log", "--since=24 hours ago", "--pretty=format:%h - %s (%an, %ar)"]
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
+        if not output.strip():
+            html = "<p>No commits in the last 24 hours.</p>"
+        else:
+            # Escape is minimal since we're returning preformatted text
+            html = "<pre style='white-space:pre-wrap;font-size:14px;background:#0f0f0f;color:#eee;padding:12px;border-radius:8px;'>%s</pre>" % Markup.escape(output)
+    except Exception as e:
+        # Common cases: git not installed, repository not available on instance, permission issues
+        msg = (
+            "Could not read git history on this server. This usually means the deployed instance "
+            "does not have the git repository or git is not installed.\n\n"
+            "To produce the same 24-hour progress locally, run:\n\n"
+            "  git log --since='24 hours ago' --pretty=format:\"%h - %s (%an, %ar)\" > PROGRESS-24H.md\n\n"
+            "Then add PROGRESS-24H.md to your repo and push to trigger a redeploy."
+        )
+        html = "<pre style='white-space:pre-wrap;font-size:14px;background:#0f0f0f;color:#f88;padding:12px;border-radius:8px;'>%s\n\nError: %s</pre>" % (Markup.escape(msg), Markup.escape(str(e)))
+
+    page = f"""
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>PushClash — 24h Progress</title>
+        <style>
+          body{{background:#0a0a0a;color:#fff;font-family:system-ui,Segoe UI,Roboto,'Poppins',sans-serif;padding:24px}}
+          .container{{max-width:900px;margin:0 auto}}
+          h1{{color:#ffcc00}}
+          .note{{color:#aaa;margin-bottom:12px}}
+          a.button{{display:inline-block;padding:10px 14px;background:#ff4500;color:#fff;border-radius:10px;text-decoration:none;margin-bottom:16px}}
+          pre{{overflow:auto}}
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>PushClash — 24h Progress</h1>
+          <p class="note">This page shows commits made in the last 24 hours (git log). Useful for hackathon progress demos.</p>
+          <a class="button" href="/">← Back to app</a>
+          {html}
+        </div>
+      </body>
+    </html>
+    """
+    return page
+
 # ---------- API ----------
 @app.route('/api/check-email', methods=['POST'])
 def check_email():
     email = request.get_json().get('email','').strip()
-    if not email: return jsonify({'exists':False})
+    if not email:
+        return jsonify({'exists':False})
     cur = get_db().cursor()
     cur.execute('SELECT COUNT(*) FROM battles WHERE email=%s',(email,))
     return jsonify({'exists':cur.fetchone()[0]>0})
@@ -64,9 +125,16 @@ def check_email():
 @app.route('/api/battle', methods=['POST'])
 def record_battle():
     d = request.get_json()
-    n, nat, em, sc = d.get('name','').strip(), d.get('nationality','').strip(), d.get('email','').strip(), int(d.get('score',0))
+    try:
+        n = d.get('name','').strip()
+        nat = d.get('nationality','').strip()
+        em = d.get('email','').strip()
+        sc = int(d.get('score',0))
+    except Exception:
+        return jsonify({'error':'Invalid data'}),400
     ghost = d.get('ghost_timestamps', None)
-    if not n or not nat or not em or sc<=0: return jsonify({'error':'Invalid data'}),400
+    if not n or not nat or not em or sc<=0:
+        return jsonify({'error':'Invalid data'}),400
     cur = get_db().cursor()
     cur.execute(
         'INSERT INTO battles (name,nationality,email,score,ghost_data) VALUES (%s,%s,%s,%s,%s)',
@@ -78,7 +146,8 @@ def record_battle():
 @app.route('/api/ghost')
 def ghost():
     email = request.args.get('email','').strip()
-    if not email: return jsonify({'ghost':None})
+    if not email:
+        return jsonify({'ghost':None})
     cur = get_db().cursor()
     cur.execute("SELECT score, ghost_data FROM battles WHERE email=%s AND ghost_data IS NOT NULL ORDER BY score DESC LIMIT 1", (email,))
     row = cur.fetchone()
@@ -103,8 +172,10 @@ def leaderboard():
 @app.route('/api/stats', methods=['POST'])
 def user_stats():
     email = request.get_json().get('email')
-    if email: update_active_user(email)
-    if not email: return jsonify({'totalBattles':0,'personalBest':0,'rank':'-','totalPushups':0,'recentBattles':[]})
+    if email:
+        update_active_user(email)
+    if not email:
+        return jsonify({'totalBattles':0,'personalBest':0,'rank':'-','totalPushups':0,'recentBattles':[]})
     cur = get_db().cursor()
     cur.execute('SELECT COUNT(*), COALESCE(MAX(score),0), COALESCE(SUM(score),0) FROM battles WHERE email=%s',(email,))
     total,best,total_pushups = cur.fetchone()
@@ -119,24 +190,30 @@ def user_stats():
 @app.route('/api/streak')
 def streak():
     email = request.args.get('email','').strip()
-    if not email: return jsonify({'streak':0,'lastDate':None})
+    if not email:
+        return jsonify({'streak':0,'lastDate':None})
     cur = get_db().cursor()
     cur.execute('SELECT DISTINCT DATE(timestamp) as day FROM battles WHERE email=%s ORDER BY day DESC LIMIT 60',(email,))
     days = [r['day'] for r in cur.fetchall()]
-    if not days: return jsonify({'streak':0,'lastDate':None})
+    if not days:
+        return jsonify({'streak':0,'lastDate':None})
     today = datetime.now(timezone.utc).date()
     yesterday = today - timedelta(days=1)
-    if days[0] not in (today,yesterday): return jsonify({'streak':0,'lastDate':str(days[0])})
+    if days[0] not in (today,yesterday):
+        return jsonify({'streak':0,'lastDate':str(days[0])})
     s = 1
     for i in range(1,len(days)):
-        if (days[i-1]-days[i]).days==1: s+=1
-        else: break
+        if (days[i-1]-days[i]).days==1:
+            s+=1
+        else:
+            break
     return jsonify({'streak':s,'lastDate':str(days[0])})
 
 @app.route('/api/target')
 def target():
     email = request.args.get('email','').strip()
-    if not email: return jsonify({'target':10,'todayDone':0})
+    if not email:
+        return jsonify({'target':10,'todayDone':0})
     cur = get_db().cursor()
     today_start = datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0)
     cur.execute('SELECT COALESCE(SUM(score),0) FROM battles WHERE email=%s AND timestamp>=%s',(email,today_start))
@@ -267,12 +344,10 @@ FRONTEND_HTML = r"""
   .motivation-banner strong{color:#ff4500}
   .fade-out{animation:fadeOutBanner 1s ease forwards}
   @keyframes fadeOutBanner{0%{opacity:1}100%{opacity:0}}
-
   .ghost-overlay{position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.7);padding:8px 14px;border-radius:12px;font-size:1.2rem;z-index:8;display:none}
   .ghost-overlay .ghost-icon{font-size:1.5rem}
   .ghost-overlay .ghost-count{font-weight:bold;color:#aaa;margin-left:5px}
   .ghost-beaten{color:#0f0 !important}
-
   .intro-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:radial-gradient(circle at 50% 40%, #0d071a 0%, #000 100%);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
   .intro-scene{display:flex;flex-direction:column;align-items:center;justify-content:space-between;height:100%;width:100%;padding:60px 20px 40px}
   .intro-title-top{text-align:center;z-index:10}
@@ -298,7 +373,6 @@ FRONTEND_HTML = r"""
   .skip-btn{position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.1);color:#aaa;padding:6px 16px;border-radius:20px;font-size:0.8rem;cursor:pointer;z-index:999}
   .intro-fadeout{animation:fadeOutIntro 0.8s ease forwards}
   @keyframes fadeOutIntro{0%{opacity:1}100%{opacity:0;visibility:hidden}}
-
   .luffy-badge{position:fixed;top:15px;right:15px;z-index:10000;cursor:pointer;display:flex;flex-direction:column;align-items:center}
   .luffy-img{width:70px;height:70px;border-radius:50%;object-fit:cover;border:none;box-shadow:0 0 15px rgba(0,191,255,0.6),0 0 30px rgba(255,69,0,0.4)}
   .ceo-label{font-size:.7rem;color:#ddd;margin-top:6px;background:rgba(0,0,0,0.7);padding:3px 10px;border-radius:12px;text-align:center}
@@ -325,7 +399,6 @@ FRONTEND_HTML = r"""
   .stats-card{flex:1;background:#1a1a1a;border-radius:12px;padding:12px;text-align:center}
   .stats-card .big-num{font-size:2rem;font-weight:bold;color:#0ff}
   .recent-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #333}
-
   .weekly-plan-container{background:rgba(0,0,0,0.7);border-radius:16px;padding:16px;margin:15px 0}
   .day-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;position:relative}
   .day-row:last-child{border-bottom:none}
@@ -343,9 +416,14 @@ FRONTEND_HTML = r"""
   .ai-assistant{position:fixed;bottom:20px;right:20px;z-index:15000;background:linear-gradient(135deg,#ff4500,#ff00ff);color:#fff;padding:10px 16px;border-radius:20px;font-size:0.85rem;max-width:250px;box-shadow:0 0 20px rgba(255,0,255,0.4);cursor:pointer}
   .ai-msg{display:block;line-height:1.4}
   .ai-mute{position:absolute;top:-8px;right:-8px;background:#fff;color:#000;width:24px;height:24px;border-radius:50%;font-size:0.8rem;border:none;cursor:pointer}
+  /* small hackathon banner */
+  .hack-banner{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:10001;background:linear-gradient(135deg,#ff4500,#ff00ff);padding:8px 14px;border-radius:16px;color:#fff;font-weight:700;box-shadow:0 6px 20px rgba(0,0,0,0.6);cursor:pointer;border:2px solid rgba(255,255,255,0.06)}
+  .hack-banner a{color:#fff;text-decoration:none}
 </style>
 </head>
 <body>
+
+<div class="hack-banner"><a href="/progress" target="_blank">🏁 Hackathon — See last 24h progress</a></div>
 
 <!-- INTRO -->
 <div id="introOverlay" class="intro-overlay">
@@ -430,16 +508,27 @@ FRONTEND_HTML = r"""
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2"></script>
 <script>
-  let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval, countdownInterval, challengeMode = 'normal', aiDetector = null, aiStream = null;
+  // ===== CONFIG =====
+  const REP_DOWN_THRESHOLD = 95;   // elbow angle (deg) below this => "down" position
+  const REP_UP_THRESHOLD = 160;    // elbow angle above this => "up" position
+  const MIN_REP_TIME = 400;        // ms minimum time between counted reps
+  const ANGLE_SMOOTH_FRAMES = 6;   // moving average window
+  const HIP_SHOULDER_SAG_LIMIT = 0.12; // normalized (y) threshold for hip sag check
+  const MIN_VISIBLE_SCORE = 0.35;  // min keypoint visibility to use them
+
+  // State
+  let currentUser = null, repCount = 0, timeLeft = 60, challengeInterval = null, countdownInterval = null, challengeMode = 'normal', aiDetector = null, aiStream = null;
   let muteAI = false;
   let idleTimer = null;
   let bannerTimer = null;
   let ghostTimestamps = [];
   let battleStartTime = 0;
   let ghostData = null;
-  let formFeedbackCooldown = 0;
   let lastFeedbackTime = 0;
-  let feedbackHistory = [];
+  let lastRepTime = 0;
+  let angleBuffer = [];
+  let aiState = 'up'; // 'up' | 'down'
+  let aiStateDownAt = 0;
   const trashTalks = ["Even my grandma does more! 💀","Weak sauce!","Push-up? More like push-over.","Bro, my cat reps more.","Too ez. Next!"];
   const BASE = window.location.origin;
 
@@ -522,94 +611,189 @@ FRONTEND_HTML = r"""
     }
   }
 
-  // ---------- Form Coaching Functions ----------
+  // ---------- Helper math / form utils ----------
+  function isKeypointVisible(p) { return p && p.score !== undefined && p.score >= MIN_VISIBLE_SCORE; }
+  function calculateAngle(a,b,c){
+    const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+    let angle = Math.abs(radians * 180.0 / Math.PI);
+    if (angle > 180.0) angle = 360 - angle;
+    return angle;
+  }
+
+  // ---------- Form Coaching (improved) ----------
   function analyzeForm(kp) {
-    // Get keypoints
     const leftShoulder = kp[5], rightShoulder = kp[6];
     const leftElbow = kp[7], rightElbow = kp[8];
     const leftWrist = kp[9], rightWrist = kp[10];
     const leftHip = kp[11], rightHip = kp[12];
-    const leftKnee = kp[13], rightKnee = kp[14];
-    const leftAnkle = kp[15], rightAnkle = kp[16];
-    
-    // Check if all keypoints are visible
-    if (!leftShoulder || !rightShoulder || !leftElbow || !rightElbow || 
-        !leftWrist || !rightWrist || !leftHip || !rightHip) {
+
+    if (!isKeypointVisible(leftShoulder) || !isKeypointVisible(rightShoulder) ||
+        !isKeypointVisible(leftElbow) || !isKeypointVisible(rightElbow) ||
+        !isKeypointVisible(leftHip) || !isKeypointVisible(rightHip)) {
       return null;
     }
-    
-    // Calculate angles
-    const leftElbowAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-    const rightElbowAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+
+    const leftElbowAngle = calculateAngle(leftShoulder, leftElbow, leftWrist || leftElbow);
+    const rightElbowAngle = calculateAngle(rightShoulder, rightElbow, rightWrist || rightElbow);
     const avgElbowAngle = (leftElbowAngle + rightElbowAngle) / 2;
-    
-    // Check shoulder alignment (for flaring)
-    const shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x);
+
+    const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+    const hipY = (leftHip.y + rightHip.y) / 2;
+    const hipToShoulderRatio = (hipY - shoulderY) / (shoulderY || 1);
+
+    const shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x) || 1;
     const elbowWidth = Math.abs(leftElbow.x - rightElbow.x);
     const flaringRatio = elbowWidth / shoulderWidth;
-    
-    // Check hip alignment (for sagging)
-    const hipY = (leftHip.y + rightHip.y) / 2;
-    const shoulderY = (leftShoulder.y + rightShoulder.y) / 2;
-    const hipToShoulderRatio = (hipY - shoulderY) / shoulderY;
-    
-    // Check depth (based on elbow angle)
-    const isDeepEnough = avgElbowAngle < 100;
-    
-    // Determine feedback
+
     let feedbacks = [];
     let priority = 'good';
-    
-    // Elbow flaring check
-    if (flaringRatio > 1.5 && avgElbowAngle < 140) {
-      feedbacks.push("Keep your elbows close to your body!");
+
+    if (avgElbowAngle > REP_DOWN_THRESHOLD + 20) {
+      feedbacks.push("Bend more at the elbows to reach a deeper push-up.");
       priority = 'bad';
-    }
-    
-    // Depth check (only when going down)
-    if (avgElbowAngle < 120 && avgElbowAngle > 70) {
-      if (avgElbowAngle > 95) {
-        feedbacks.push("Go deeper! Chest to the ground!");
-        priority = 'bad';
-      } else if (avgElbowAngle < 75) {
-        feedbacks.push("Perfect depth! Keep this form!");
-        priority = 'good';
-      }
-    }
-    
-    // Hip sagging check
-    if (hipToShoulderRatio > 0.6 && avgElbowAngle < 140) {
-      feedbacks.push("Your hips are sagging! Tighten your core!");
-      priority = 'bad';
-    }
-    
-    // Perfect form
-    if (feedbacks.length === 0 && avgElbowAngle > 150) {
-      feedbacks.push("Great form! Keep it up!");
+    } else if (avgElbowAngle < REP_DOWN_THRESHOLD - 15) {
+      feedbacks.push("Nice depth — keep it steady!");
       priority = 'good';
     }
-    
-    return {
-      messages: feedbacks,
-      priority: priority,
-      elbowAngle: avgElbowAngle,
-      depth: isDeepEnough
-    };
+
+    if (flaringRatio > 1.3) {
+      feedbacks.push("Tuck your elbows closer to protect shoulders!");
+      priority = 'bad';
+    }
+
+    if (hipToShoulderRatio > HIP_SHOULDER_SAG_LIMIT) {
+      feedbacks.push("Hips sagging — brace your core!");
+      priority = 'bad';
+    }
+
+    if (feedbacks.length === 0) {
+      feedbacks.push("Good form — maintain it!");
+      priority = 'good';
+    }
+
+    return { messages: feedbacks, priority: priority, elbowAngle: avgElbowAngle, hipSag: hipToShoulderRatio };
   }
 
   function showFormFeedback(feedback) {
-    if (!feedback || feedback.messages.length === 0) {
+    if (!feedback || !feedback.messages || feedback.messages.length === 0) {
       document.getElementById('formFeedback').style.display = 'none';
       return;
     }
-    
     const el = document.getElementById('formFeedback');
     el.textContent = feedback.messages[0];
-    el.className = 'form-feedback ' + feedback.priority;
+    el.className = 'form-feedback ' + (feedback.priority === 'bad' ? 'bad' : 'good');
     el.style.display = 'block';
   }
 
-  // ---------- CHALLENGE START ----------
+  // ---------- Pose detection & rep counting ----------
+  function movingAverage(arr, N) {
+    const recent = arr.slice(-N);
+    if (recent.length === 0) return null;
+    return recent.reduce((a, b) => a + b, 0) / recent.length;
+  }
+
+  async function startAIModel(){
+    try{
+      const cfg = { modelType: 'SinglePose.Lightning' };
+      aiDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, cfg);
+      document.getElementById('debugMsg').textContent = '✅ AI ready – show yourself!';
+    }catch(e){
+      document.getElementById('debugMsg').textContent = '❌ AI model failed. Check internet.';
+    }
+  }
+
+  async function startAICamera(){
+    const video=document.getElementById('webcam'),canvas=document.getElementById('poseCanvas'),ctx=canvas.getContext('2d'),debugMsg=document.getElementById('debugMsg');
+    video.setAttribute('muted','');video.setAttribute('autoplay','');video.setAttribute('playsinline','');
+    try{aiStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});video.srcObject=aiStream;await video.play();}catch(e){try{aiStream=await navigator.mediaDevices.getUserMedia({video:true});video.srcObject=aiStream;await video.play();debugMsg.textContent='✅ Camera ready (basic)';}catch(e2){debugMsg.textContent='❌ Camera access denied!';return}}
+    video.addEventListener('loadedmetadata',()=>{canvas.width=video.videoWidth;canvas.height=video.videoHeight;});
+    angleBuffer=[];lastRepTime=0;aiState='up';aiStateDownAt=0;requestAnimationFrame(detectPose);
+  }
+
+  async function detectPose(){
+    if(timeLeft<=0||!aiDetector||!aiStream)return;
+    const video=document.getElementById('webcam'),canvas=document.getElementById('poseCanvas'),ctx=canvas.getContext('2d'),overlay=document.getElementById('angleOverlay'),debugMsg=document.getElementById('debugMsg');
+    if(video.readyState<2){requestAnimationFrame(detectPose);return}
+    const poses=await aiDetector.estimatePoses(video,{flipHorizontal:false});
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(!poses||poses.length===0){
+      overlay.textContent='?';overlay.style.display='block';debugMsg.textContent='🔍 Searching for pose...';requestAnimationFrame(detectPose);return;
+    }
+    const kp=poses[0].keypoints;
+    drawSkeleton(ctx,kp);
+
+    // Form coaching
+    const formFeedback = analyzeForm(kp);
+    if (formFeedback) {
+      showFormFeedback(formFeedback);
+      const now = Date.now();
+      if (formFeedback.priority === 'bad' && now - lastFeedbackTime > 2500) {
+        speak(formFeedback.messages[0]);
+        lastFeedbackTime = now;
+      }
+    }
+
+    // Required keypoints
+    const leftShoulder = kp[5], rightShoulder = kp[6], leftElbow = kp[7], rightElbow = kp[8], leftWrist = kp[9], rightWrist = kp[10], leftHip = kp[11], rightHip = kp[12];
+    if (!isKeypointVisible(leftShoulder) || !isKeypointVisible(rightShoulder) || !isKeypointVisible(leftElbow) || !isKeypointVisible(rightElbow)) {
+      overlay.textContent='?';overlay.style.display='block';debugMsg.textContent='⚠️ Not all keypoints visible';requestAnimationFrame(detectPose);return;
+    }
+
+    const leftAngle = calculateAngle(leftShoulder,leftElbow,leftWrist||leftElbow);
+    const rightAngle = calculateAngle(rightShoulder,rightElbow,rightWrist||rightElbow);
+    const avgAngle = (leftAngle+rightAngle)/2;
+    angleBuffer.push(avgAngle); if(angleBuffer.length>20)angleBuffer.shift();
+    const smoothed = movingAverage(angleBuffer, ANGLE_SMOOTH_FRAMES);
+    if(smoothed===null){requestAnimationFrame(detectPose);return}
+
+    overlay.textContent=Math.round(smoothed)+'°';overlay.style.display='block';
+    debugMsg.textContent='🟢 Active – '+Math.round(smoothed)+'°';
+
+    const shoulderY = (leftShoulder.y + rightShoulder.y)/2;
+    const hipY = (leftHip && rightHip) ? ((leftHip.y + rightHip.y)/2) : null;
+    const hipSag = hipY ? (hipY - shoulderY) / (shoulderY || 1) : 0;
+    const now = Date.now();
+
+    if (aiState === 'up' && smoothed < REP_DOWN_THRESHOLD) {
+      aiState = 'down';
+      aiStateDownAt = now;
+    } else if (aiState === 'down' && smoothed > REP_UP_THRESHOLD) {
+      if (now - lastRepTime > MIN_REP_TIME) {
+        if (hipY && hipSag > HIP_SHOULDER_SAG_LIMIT) {
+          setAIMessage('🛑 Hips sagging — brace your core!');
+        } else {
+          repCount++; document.getElementById('repCounter').textContent = repCount; lastRepTime = now;
+          if (battleStartTime > 0) ghostTimestamps.push((now - battleStartTime)/1000);
+          if (ghostData && ghostData.timestamps) {
+            const elapsed = (now - battleStartTime)/1000;
+            let ghostReps = 0;
+            for (let t of ghostData.timestamps) { if (t <= elapsed) ghostReps++; }
+            document.getElementById('ghostCount').textContent = ghostReps;
+            if (repCount > ghostReps) document.getElementById('ghostCount').classList.add('ghost-beaten'); else document.getElementById('ghostCount').classList.remove('ghost-beaten');
+          }
+          const flash=document.getElementById('repFlash'); flash.style.display='block'; setTimeout(()=>{flash.style.display='none'},700);
+        }
+      }
+      aiState = 'up';
+    }
+
+    requestAnimationFrame(detectPose);
+  }
+
+  function drawSkeleton(ctx,kp){
+    const adj=poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+    ctx.strokeStyle='#0ff';ctx.lineWidth=2;
+    for(const[p1,p2]of adj){
+      if(kp[p1].score>0.3&&kp[p2].score>0.3){
+        ctx.beginPath();ctx.moveTo(kp[p1].x,kp[p1].y);ctx.lineTo(kp[p2].x,kp[p2].y);ctx.stroke();
+      }
+    }
+    for(const p of kp){
+      if(p.score>0.3){ctx.fillStyle='#f0f';ctx.beginPath();ctx.arc(p.x,p.y,4,0,2*Math.PI);ctx.fill()}
+    }
+  }
+
+  // ---------- CHALLENGE START/END ----------
   async function startChallenge(mode) {
     challengeMode = mode || 'normal';
     ghostTimestamps = [];
@@ -643,74 +827,16 @@ FRONTEND_HTML = r"""
     timeLeft=60; battleStartTime = Date.now();
     document.getElementById('challengeActiveUI').style.display='block';document.getElementById('timerDisplay').textContent=timeLeft;
     document.getElementById('repCounter').textContent='0';document.getElementById('aiCameraUI').style.display='block';
-    document.getElementById('debugMsg').textContent='📷 Camera starting...';startAIModel();
+    document.getElementById('debugMsg').textContent='📷 Camera starting...';repCount=0;ghostTimestamps=[];
+    await startAIModel();
+    await startAICamera();
     const banner=document.getElementById('motivationBanner');banner.style.display='block';banner.classList.remove('fade-out');
     speak("AI is locked on you. Start pushing now — every rep counts! Go go go!");
     bannerTimer=setTimeout(()=>{banner.classList.add('fade-out');setTimeout(()=>{banner.style.display='none'},1000)},6000);
-    await startAICamera();
     const cueInterval=setInterval(()=>{if(timeLeft>55)return;if(timeLeft===30)speak("Halfway there, keep pushing!");else if(timeLeft===15)speak("15 seconds left, give it everything!");else if(timeLeft===10)speak("Final 10 seconds!");else if(timeLeft<=3&&timeLeft>0)speak(timeLeft.toString())},1000);
     challengeInterval=setInterval(()=>{timeLeft--;document.getElementById('timerDisplay').textContent=timeLeft;if(timeLeft<=0){clearInterval(challengeInterval);clearInterval(cueInterval);endBattle()}},1000);
     if(currentUser)fetch('/api/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentUser.email})});
   }
-
-  async function startAIModel(){ try{const cfg={modelType:'SinglePose.Lightning'};aiDetector=await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,cfg);document.getElementById('debugMsg').textContent='✅ AI ready – show yourself!';}catch(e){document.getElementById('debugMsg').textContent='❌ AI model failed. Check internet.';} }
-
-  let angleBuffer=[],lastRepTime=0,aiState='up';
-  async function startAICamera(){
-    const video=document.getElementById('webcam'),canvas=document.getElementById('poseCanvas'),ctx=canvas.getContext('2d'),debugMsg=document.getElementById('debugMsg');
-    video.setAttribute('muted','');video.setAttribute('autoplay','');video.setAttribute('playsinline','');
-    try{aiStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});video.srcObject=aiStream;await video.play();}catch(e){try{aiStream=await navigator.mediaDevices.getUserMedia({video:true});video.srcObject=aiStream;await video.play();debugMsg.textContent='✅ Camera ready (basic)';}catch(e2){debugMsg.textContent='❌ Camera access denied!';return}}
-    video.addEventListener('loadedmetadata',()=>{canvas.width=video.videoWidth;canvas.height=video.videoHeight;});angleBuffer=[];lastRepTime=0;aiState='up';requestAnimationFrame(detectPose);
-  }
-
-  function movingAverage(arr,N){const recent=arr.slice(-N);if(recent.length===0)return null;return recent.reduce((a,b)=>a+b,0)/recent.length;}
-  async function detectPose(){
-    if(timeLeft<=0||!aiDetector||!aiStream)return;
-    const video=document.getElementById('webcam'),canvas=document.getElementById('poseCanvas'),ctx=canvas.getContext('2d'),overlay=document.getElementById('angleOverlay'),debugMsg=document.getElementById('debugMsg');
-    if(video.readyState<2){requestAnimationFrame(detectPose);return}
-    const poses=await aiDetector.estimatePoses(video,{flipHorizontal:false});ctx.clearRect(0,0,canvas.width,canvas.height);
-    if(poses.length>0){
-      const kp=poses[0].keypoints;drawSkeleton(ctx,kp);
-      
-      // --- Form Coaching ---
-      const formFeedback = analyzeForm(kp);
-      if (formFeedback) {
-        showFormFeedback(formFeedback);
-        
-        // Speak feedback if priority is 'bad' (with cooldown)
-        const now = Date.now();
-        if (formFeedback.priority === 'bad' && now - lastFeedbackTime > 3000) {
-          if (formFeedback.messages.length > 0) {
-            speak(formFeedback.messages[0]);
-            lastFeedbackTime = now;
-          }
-        }
-      }
-      
-      const ls=kp[5],rs=kp[6],le=kp[7],lw=kp[9],re=kp[8],rw=kp[10];
-      if(ls&&le&&lw&&rs&&re&&rw){
-        const la=calculateAngle(ls,le,lw),ra=calculateAngle(rs,re,rw),raw=(la+ra)/2;angleBuffer.push(raw);if(angleBuffer.length>5)angleBuffer.shift();
-        const sa=movingAverage(angleBuffer,5);if(sa===null){requestAnimationFrame(detectPose);return}
-        overlay.textContent=Math.round(sa)+'°';overlay.style.display='block';debugMsg.textContent='🟢 Active – '+Math.round(sa)+'°';
-        const now=Date.now();if(aiState==='up'&&sa<90){aiState='down'}else if(aiState==='down'&&sa>150){if(now-lastRepTime>500){repCount++;document.getElementById('repCounter').textContent=repCount;lastRepTime=now;
-          if (battleStartTime > 0) { ghostTimestamps.push((now - battleStartTime) / 1000); }
-          if (ghostData && ghostData.timestamps) {
-            const elapsed = (now - battleStartTime) / 1000;
-            let ghostReps = 0;
-            for (let t of ghostData.timestamps) { if (t <= elapsed) ghostReps++; }
-            document.getElementById('ghostCount').textContent = ghostReps;
-            if (repCount > ghostReps) document.getElementById('ghostCount').classList.add('ghost-beaten');
-            else document.getElementById('ghostCount').classList.remove('ghost-beaten');
-          }
-          const flash=document.getElementById('repFlash');flash.style.display='block';setTimeout(()=>{flash.style.display='none'},800);
-        }aiState='up'}
-      }else{overlay.textContent='?';overlay.style.display='block';debugMsg.textContent='⚠️ Not all keypoints visible'}
-    }else{overlay.textContent='?';overlay.style.display='block';debugMsg.textContent='🔍 Searching for pose...'}
-    requestAnimationFrame(detectPose);
-  }
-
-  function calculateAngle(a,b,c){const radians=Math.atan2(c.y-b.y,c.x-b.x)-Math.atan2(a.y-b.y,a.x-b.x);let angle=Math.abs(radians*180.0/Math.PI);if(angle>180.0)angle=360-angle;return angle;}
-  function drawSkeleton(ctx,kp){const adj=poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);ctx.strokeStyle='#0ff';ctx.lineWidth=2;for(const[p1,p2]of adj){if(kp[p1].score>0.3&&kp[p2].score>0.3){ctx.beginPath();ctx.moveTo(kp[p1].x,kp[p1].y);ctx.lineTo(kp[p2].x,kp[p2].y);ctx.stroke()}}for(const p of kp){if(p.score>0.3){ctx.fillStyle='#f0f';ctx.beginPath();ctx.arc(p.x,p.y,4,0,2*Math.PI);ctx.fill()}}}
 
   async function endBattle(){
     if(aiStream){aiStream.getTracks().forEach(t=>t.stop());aiStream=null}if(bannerTimer)clearTimeout(bannerTimer);
